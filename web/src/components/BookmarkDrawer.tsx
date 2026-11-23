@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Archive, ArchiveRestore, ExternalLink, Hash, Trash2, X } from "lucide-react";
 import { api, ApiError } from "../api";
 import type { Bookmark, List } from "../types";
+import { useFocusTrap } from "./glass/useFocusTrap";
 
 interface BookmarkDrawerProps {
   bookmark: Bookmark | null;
@@ -37,8 +38,11 @@ export function BookmarkDrawer({
   const [holding, setHolding] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const holdTimerRef = useRef<number | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const openerRef = useRef<HTMLElement | null>(null);
+
+  useFocusTrap(panelRef, Boolean(bookmark));
 
   useEffect(() => {
     if (!bookmark) return;
@@ -93,7 +97,7 @@ export function BookmarkDrawer({
     window.setTimeout(() => {
       onClose(false);
       openerRef.current?.focus();
-    }, 210);
+    }, 190);
   }
 
   function addTagFromDraft() {
@@ -186,16 +190,20 @@ export function BookmarkDrawer({
       }}
     >
       <div
-        className="drawer-panel"
+        ref={panelRef}
+        className="drawer-panel glass-rim"
         role="dialog"
         aria-modal="true"
         aria-labelledby="drawer-heading"
       >
         <div className="drawer-header">
-          <h2 id="drawer-heading" style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
-            Bookmark Details
-          </h2>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div className="drawer-title-wrap">
+            <h2 id="drawer-heading" className="drawer-title">
+              Bookmark Details
+            </h2>
+            {activeBookmark.archived && <span className="status-badge">Archived</span>}
+          </div>
+          <div className="drawer-header-actions">
             <a
               href={activeBookmark.url}
               target="_blank"
@@ -217,7 +225,7 @@ export function BookmarkDrawer({
         </div>
 
         <div className="drawer-body">
-          <div style={{ fontSize: 12, color: "var(--fg-muted)", wordBreak: "break-all" }}>
+          <div className="drawer-url-banner">
             <a href={activeBookmark.url} target="_blank" rel="noopener noreferrer">
               {activeBookmark.url}
             </a>
@@ -243,8 +251,7 @@ export function BookmarkDrawer({
             </label>
             <textarea
               id="edit-desc"
-              className="textarea"
-              style={{ minHeight: 74 }}
+              className="textarea textarea-compact"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
@@ -267,7 +274,7 @@ export function BookmarkDrawer({
             <label className="field-label" htmlFor="edit-tag-input">
               Tags
             </label>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="tag-input-row">
               <input
                 id="edit-tag-input"
                 type="text"
@@ -287,7 +294,7 @@ export function BookmarkDrawer({
               </button>
             </div>
             {tags.length > 0 && (
-              <div className="pill-row" style={{ marginTop: 6 }}>
+              <div className="pill-row">
                 {tags.map((tag) => (
                   <button
                     key={tag}
@@ -308,7 +315,7 @@ export function BookmarkDrawer({
           {allLists.length > 0 && (
             <div className="field">
               <span className="field-label">Lists</span>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <div className="pill-row">
                 {allLists.map((list) => {
                   const checked = selectedListIDs.includes(list.id);
                   return (
@@ -329,7 +336,7 @@ export function BookmarkDrawer({
         </div>
 
         <div className="drawer-footer">
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div className="drawer-footer-left">
             <button
               type="button"
               className="btn btn-secondary"

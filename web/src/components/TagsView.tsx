@@ -42,14 +42,17 @@ export function TagsView({ tags, onRefresh, onFilterByTag, onNotify }: TagsViewP
   }
 
   return (
-    <section className="panel" aria-labelledby="tags-heading">
-      <div>
-        <h1 id="tags-heading" style={{ margin: 0, fontSize: 19, fontWeight: 700 }}>
-          Tags
-        </h1>
-        <p style={{ margin: "4px 0 0", fontSize: 14, color: "var(--fg-muted)" }}>
-          Organize bookmarks with lightweight labels. Click any tag to filter your vault.
-        </p>
+    <section className="glass-panel glass-rim" aria-labelledby="tags-heading">
+      <div className="panel-header">
+        <div>
+          <h1 id="tags-heading" className="panel-title">
+            Tags
+          </h1>
+          <p className="panel-subtitle">
+            Organize bookmarks with lightweight labels. Click any tag to filter your vault.
+          </p>
+        </div>
+        <span className="panel-count-pill tabular-nums">{tags.length} tags</span>
       </div>
 
       <form onSubmit={handleCreate} className="inline-form">
@@ -71,41 +74,29 @@ export function TagsView({ tags, onRefresh, onFilterByTag, onNotify }: TagsViewP
       </form>
 
       {tags.length === 0 ? (
-        <p style={{ margin: 0, fontSize: 14, color: "var(--fg-muted)" }}>
+        <p className="panel-empty">
           No tags yet. Tags added to bookmarks appear here automatically.
         </p>
       ) : (
         <div className="grid-cards">
           {tags.map((tag) => (
-            <div key={tag.id} className="entity-card">
+            <div key={tag.id} className="entity-card glass-rim">
               <button
                 type="button"
+                className="entity-card-btn"
                 onClick={() => onFilterByTag(tag.name)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  padding: 0,
-                  textAlign: "left",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                  minWidth: 0,
-                  flex: 1,
-                }}
               >
-                <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600, fontSize: 15 }}>
-                  <Hash size={15} aria-hidden="true" style={{ color: "var(--accent-text)" }} />
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {tag.name}
-                  </span>
+                <span className="entity-card-title">
+                  <Hash size={15} aria-hidden="true" className="entity-card-icon" />
+                  <span className="entity-card-name">{tag.name}</span>
                 </span>
-                <span className="tabular-nums" style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+                <span className="entity-card-meta tabular-nums">
                   {tag.count ?? 0} bookmarks
                 </span>
               </button>
               <button
                 type="button"
-                className="btn btn-ghost btn-icon"
+                className="btn btn-ghost btn-icon btn-icon-sm"
                 onClick={() => handleDelete(tag)}
                 aria-label={`Delete tag ${tag.name}`}
               >

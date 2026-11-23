@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { X } from "lucide-react";
+import { BookmarkPlus, X } from "lucide-react";
 import { api, ApiError } from "../api";
 import type { Bookmark, List } from "../types";
+import { useFocusTrap } from "./glass/useFocusTrap";
 
 interface AddBookmarkModalProps {
   open: boolean;
@@ -30,8 +31,11 @@ export function AddBookmarkModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const urlInputRef = useRef<HTMLInputElement | null>(null);
   const openerRef = useRef<HTMLElement | null>(null);
+
+  useFocusTrap(panelRef, open);
 
   useEffect(() => {
     if (!open) return;
@@ -80,7 +84,7 @@ export function AddBookmarkModal({
     window.setTimeout(() => {
       onClose(false);
       openerRef.current?.focus();
-    }, 160);
+    }, 150);
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -123,15 +127,21 @@ export function AddBookmarkModal({
       }}
     >
       <div
-        className="modal-panel"
+        ref={panelRef}
+        className="modal-panel glass-rim"
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-bookmark-heading"
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <h2 id="add-bookmark-heading" style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>
-            Save URL
-          </h2>
+        <div className="modal-header">
+          <div className="modal-title-group">
+            <span className="modal-icon-well" aria-hidden="true">
+              <BookmarkPlus size={16} />
+            </span>
+            <h2 id="add-bookmark-heading" className="modal-title">
+              Save URL
+            </h2>
+          </div>
           <button
             type="button"
             className="btn btn-ghost btn-icon"
@@ -142,7 +152,7 @@ export function AddBookmarkModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <form onSubmit={handleSubmit} className="modal-form">
           <div className="field">
             <label className="field-label" htmlFor="add-url">
               URL
@@ -203,8 +213,7 @@ export function AddBookmarkModal({
             </label>
             <textarea
               id="add-notes"
-              className="textarea"
-              style={{ minHeight: 74 }}
+              className="textarea textarea-compact"
               placeholder="Quick context for later search..."
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
@@ -217,7 +226,7 @@ export function AddBookmarkModal({
             </div>
           )}
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 4 }}>
+          <div className="modal-actions">
             <button type="button" className="btn btn-secondary" onClick={() => requestClose(false)}>
               Cancel
             </button>

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Menu, Plus, Search, X } from "lucide-react";
+import { LayoutGrid, List as ListIcon, Menu, Plus, RotateCcw, Search, Upload, X } from "lucide-react";
 import { api, ApiError, setUnauthorizedHandler } from "./api";
 import { AddBookmarkModal } from "./components/AddBookmarkModal";
 import { BookmarkDrawer } from "./components/BookmarkDrawer";
 import { BookmarkList } from "./components/BookmarkList";
+import { AmbientBackdrop } from "./components/glass/AmbientBackdrop";
+import { GlassSegmented } from "./components/glass/GlassSegmented";
 import { ImportView } from "./components/ImportView";
 import { ListsView } from "./components/ListsView";
 import { LoginView } from "./components/LoginView";
@@ -23,8 +25,19 @@ function getInitialTheme(): "dark" | "light" {
   return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
+function getInitialViewMode(): "grid" | "list" {
+  try {
+    const saved = localStorage.getItem("sv_view_mode");
+    if (saved === "grid" || saved === "list") return saved;
+  } catch {
+    // ignore storage restriction
+  }
+  return "grid";
+}
+
 export function App() {
   const [theme, setTheme] = useState<"dark" | "light">(getInitialTheme);
+  const [viewMode, setViewMode] = useState<"grid" | "list">(getInitialViewMode);
   const [authState, setAuthState] = useState<{
     loading: boolean;
     authenticated: boolean;
@@ -59,12 +72,21 @@ export function App() {
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
+    document.documentElement.style.colorScheme = theme;
     try {
       localStorage.setItem("sv_theme", theme);
     } catch {
       // ignore storage restriction
     }
   }, [theme]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("sv_view_mode", viewMode);
+    } catch {
+      // ignore storage restriction
+    }
+  }, [viewMode]);
 
   const notify = useCallback((message: string, tone: "success" | "error" | "info" = "info") => {
     const id = toastIDRef.current++;
@@ -215,7 +237,11 @@ export function App() {
   if (authState.loading) {
     return (
       <main className="login-page">
-        <p style={{ color: "var(--fg-muted)", fontSize: 14 }}>Loading Social Vault...</p>
+        <AmbientBackdrop />
+        <div className="loading-pill glass-rim">
+          <span className="loading-dot" aria-hidden="true" />
+          <span>Loading Social Vault...</span>
+        </div>
       </main>
     );
   }
@@ -237,6 +263,8 @@ export function App() {
 
   return (
     <div className="app-shell">
+      <AmbientBackdrop />
+
       <Sidebar
         open={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}
@@ -255,7 +283,7 @@ export function App() {
       />
 
       <div className="main-area">
-        <header className="topbar">
+        <header className="topbar glass-rim">
           <button
             type="button"
             className="btn btn-ghost btn-icon mobile-menu-btn"
@@ -282,22 +310,52 @@ export function App() {
                 if (activeView !== "bookmarks") setActiveView("bookmarks");
               }}
             />
-            <span className="search-kbd" aria-hidden="true">
-              /
-            </span>
+            {searchInput ? (
+              <button
+                type="button"
+                className="search-clear-btn"
+                onClick={() => {
+                  setSearchInput("");
+                  setDebouncedQuery("");
+                  searchInputRef.current?.focus();
+                }}
+                aria-label="Clear search"
+              >
+                <X size={14} aria-hidden="true" />
+              </button>
+            ) : (
+              <span className="search-kbd" aria-hidden="true">
+                /
+              </span>
+            )}
           </div>
 
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => {
-              setAddModalInstant(false);
-              setAddModalOpen(true);
-            }}
-          >
-            <Plus size={16} aria-hidden="true" />
-            <span>Add URL</span>
-          </button>
+          <div className="topbar-actions">
+            <button
+              type="button"
+              className={`btn btn-glass ${activeView === "import" ? "is-active-nav" : ""}`}
+              aria-current={activeView === "import" ? "page" : undefined}
+              onClick={() => setActiveView("import")}
+            >
+              <Upload size={15} aria-hidden="true" />
+              <span className="topbar-btn-label">Import</span>
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                setAddModalInstant(false);
+                setAddModalOpen(true);
+              }}
+            >
+              <Plus size={16} aria-hidden="true" />
+              <span>Save URL</span>
+              <span className="btn-kbd" aria-hidden="true">
+                N
+              </span>
+            </button>
+          </div>
         </header>
 
         <main className="content-container">
@@ -305,61 +363,106 @@ export function App() {
             <>
               <StatsBar
                 stats={stats}
+                activeArchivedFilter={archivedFilter}
+                selectedTag={selectedTag}
                 onSelectArchived={(f) => setArchivedFilter(f)}
-                onSelectTag={(name) => setSelectedTag(name)}
+                onSelectTag={(name) =>
+                  setSelectedTag((prev) =>
+                    prev.toLowerCase() === name.toLowerCase() ? "" : name
+                  )
+                }
               />
 
               <div className="toolbar">
-                <div className="segmented" role="group" aria-label="Archive status filter">
-                  {(
-                    [
-                      ["all", "All"],
-                      ["false", "Active"],
-                      ["true", "Archived"],
-                    ] as const
-                  ).map(([val, label]) => (
-                    <button
-                      key={val}
-                      type="button"
-                      className="segmented-btn"
-                      aria-pressed={archivedFilter === val}
-                      onClick={() => setArchivedFilter(val)}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                <div className="toolbar-left">
+                  <GlassSegmented
+                    ariaLabel="Archive status filter"
+                    value={archivedFilter}
+                    onChange={setArchivedFilter}
+                    options={[
+                      { value: "all", label: "All" },
+                      { value: "false", label: "Active" },
+                      { value: "true", label: "Archived" },
+                    ]}
+                  />
+
+                  <div className="active-filters">
+                    {selectedList && (
+                      <button
+                        type="button"
+                        className="filter-chip"
+                        onClick={() => setSelectedList("")}
+                      >
+                        <span>List: {selectedList}</span>
+                        <X size={13} aria-hidden="true" />
+                      </button>
+                    )}
+                    {selectedTag && (
+                      <button
+                        type="button"
+                        className="filter-chip"
+                        onClick={() => setSelectedTag("")}
+                      >
+                        <span>#{selectedTag}</span>
+                        <X size={13} aria-hidden="true" />
+                      </button>
+                    )}
+                    {debouncedQuery && (
+                      <button
+                        type="button"
+                        className="filter-chip"
+                        onClick={() => {
+                          setSearchInput("");
+                          setDebouncedQuery("");
+                        }}
+                      >
+                        <span>“{debouncedQuery}”</span>
+                        <X size={13} aria-hidden="true" />
+                      </button>
+                    )}
+                    {hasActiveFilters && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-compact"
+                        onClick={clearFilters}
+                      >
+                        <RotateCcw size={13} aria-hidden="true" />
+                        Reset
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                <div className="active-filters">
-                  {selectedList && (
-                    <button
-                      type="button"
-                      className="filter-chip"
-                      onClick={() => setSelectedList("")}
-                    >
-                      List: {selectedList}
-                      <X size={13} aria-hidden="true" />
-                    </button>
-                  )}
-                  {selectedTag && (
-                    <button
-                      type="button"
-                      className="filter-chip"
-                      onClick={() => setSelectedTag("")}
-                    >
-                      #{selectedTag}
-                      <X size={13} aria-hidden="true" />
-                    </button>
-                  )}
-                  <span className="tabular-nums" style={{ fontSize: 13, color: "var(--fg-muted)" }}>
+                <div className="toolbar-right">
+                  <span className="result-count tabular-nums">
                     {totalBookmarks} {totalBookmarks === 1 ? "result" : "results"}
                   </span>
+
+                  <GlassSegmented
+                    ariaLabel="Bookmark layout mode"
+                    size="sm"
+                    value={viewMode}
+                    onChange={setViewMode}
+                    options={[
+                      {
+                        value: "grid",
+                        label: <LayoutGrid size={15} aria-hidden="true" />,
+                        ariaLabel: "Grid view",
+                      },
+                      {
+                        value: "list",
+                        label: <ListIcon size={15} aria-hidden="true" />,
+                        ariaLabel: "List view",
+                      },
+                    ]}
+                  />
                 </div>
               </div>
 
               <BookmarkList
                 items={bookmarks}
                 loading={loadingBookmarks}
+                viewMode={viewMode}
                 hasActiveFilters={hasActiveFilters}
                 onOpenDetail={(b) => {
                   setDrawerInstant(false);
@@ -372,6 +475,7 @@ export function App() {
                   setAddModalInstant(false);
                   setAddModalOpen(true);
                 }}
+                onOpenImport={() => setActiveView("import")}
                 onClearFilters={clearFilters}
               />
             </>

@@ -1,4 +1,4 @@
-import { CheckCircle2, AlertCircle, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, X } from "lucide-react";
 
 export interface ToastItem {
   id: number;
@@ -24,19 +24,18 @@ export function ToastViewport({ toasts, onDismiss, onPauseChange }: ToastViewpor
       onMouseLeave={() => onPauseChange(false)}
     >
       {toasts.map((t) => (
-        <div key={t.id} className="toast" data-tone={t.tone}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+        <div key={t.id} className="toast glass-rim" data-tone={t.tone}>
+          <div className="toast-content">
             {t.tone === "error" ? (
-              <AlertCircle size={16} aria-hidden="true" style={{ color: "var(--destructive-text)", flexShrink: 0 }} />
+              <AlertCircle size={16} aria-hidden="true" className="toast-icon toast-icon-error" />
             ) : (
-              <CheckCircle2 size={16} aria-hidden="true" style={{ color: "var(--accent-text)", flexShrink: 0 }} />
+              <CheckCircle2 size={16} aria-hidden="true" className="toast-icon toast-icon-success" />
             )}
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{t.message}</span>
+            <span className="toast-message">{t.message}</span>
           </div>
           <button
             type="button"
-            className="btn btn-ghost btn-icon"
-            style={{ minWidth: 28, minHeight: 28 }}
+            className="btn btn-ghost btn-icon toast-close-btn"
             onClick={() => onDismiss(t.id)}
             aria-label="Dismiss notification"
           >

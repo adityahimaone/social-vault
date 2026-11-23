@@ -55,13 +55,16 @@ export function Sidebar({
         onClick={onClose}
         aria-hidden="true"
       />
-      <aside className={`sidebar ${open ? "is-open" : ""}`} aria-label="Vault navigation">
+      <aside className={`sidebar glass-rim ${open ? "is-open" : ""}`} aria-label="Vault navigation">
         <div className="brand-header">
           <div className="brand-mark">
             <span className="brand-badge" aria-hidden="true">
               <BookmarkIcon size={16} />
             </span>
-            <span>Social Vault</span>
+            <div className="brand-copy">
+              <span className="brand-name">Social Vault</span>
+              <span className="brand-sub">Archive</span>
+            </div>
           </div>
           <button
             type="button"
@@ -188,7 +191,7 @@ export function Sidebar({
           <button type="button" className="nav-item" onClick={onToggleTheme}>
             <span className="nav-item-main">
               {theme === "dark" ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}
-              <span className="nav-item-label">{theme === "dark" ? "Light theme" : "Dark theme"}</span>
+              <span className="nav-item-label">{theme === "dark" ? "Light glass" : "Dark glass"}</span>
             </span>
           </button>
           <button type="button" className="nav-item" onClick={onLogout}>

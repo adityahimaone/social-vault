@@ -44,18 +44,20 @@ export function ImportView({ onImported, onNotify }: ImportViewProps) {
   }
 
   return (
-    <section className="panel" aria-labelledby="import-heading">
-      <div>
-        <h1 id="import-heading" style={{ margin: 0, fontSize: 19, fontWeight: 700 }}>
-          Import Bookmarks
-        </h1>
-        <p style={{ margin: "4px 0 0", fontSize: 14, color: "var(--fg-muted)" }}>
-          Upload a browser Netscape HTML bookmark file or a Karakeep JSON export. Duplicate URLs are skipped automatically.
-        </p>
+    <section className="glass-panel glass-rim" aria-labelledby="import-heading">
+      <div className="panel-header">
+        <div>
+          <h1 id="import-heading" className="panel-title">
+            Import Bookmarks
+          </h1>
+          <p className="panel-subtitle">
+            Upload a browser Netscape HTML bookmark file or a Karakeep JSON export. Duplicate URLs are skipped automatically.
+          </p>
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <div className="field" style={{ maxWidth: 280 }}>
+      <form onSubmit={handleSubmit} className="import-form">
+        <div className="field import-format-field">
           <label className="field-label" htmlFor="import-format">
             File format
           </label>
@@ -80,8 +82,10 @@ export function ImportView({ onImported, onNotify }: ImportViewProps) {
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
         >
-          <FileUp size={24} aria-hidden="true" style={{ color: "var(--accent-text)" }} />
-          <div style={{ fontSize: 14, fontWeight: 500 }}>
+          <span className="dropzone-icon" aria-hidden="true">
+            <FileUp size={22} />
+          </span>
+          <div className="dropzone-label">
             {file ? file.name : "Drop a bookmark export file here, or choose from disk"}
           </div>
           <input
@@ -113,29 +117,22 @@ export function ImportView({ onImported, onNotify }: ImportViewProps) {
       </form>
 
       {result && (
-        <div
-          style={{
-            padding: 14,
-            borderRadius: "var(--radius-md)",
-            backgroundColor: "var(--surface-muted)",
-            border: "1px solid var(--border)",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 18,
-            fontSize: 14,
-          }}
-        >
-          <div>
-            <strong>Format:</strong> {result.format}
+        <div className="import-summary">
+          <div className="import-stat">
+            <span className="import-stat-label">Format</span>
+            <span className="import-stat-value">{result.format}</span>
           </div>
-          <div className="tabular-nums">
-            <strong>Imported:</strong> {result.imported}
+          <div className="import-stat">
+            <span className="import-stat-label">Imported</span>
+            <span className="import-stat-value tabular-nums">{result.imported}</span>
           </div>
-          <div className="tabular-nums">
-            <strong>Skipped (duplicates):</strong> {result.skipped}
+          <div className="import-stat">
+            <span className="import-stat-label">Skipped</span>
+            <span className="import-stat-value tabular-nums">{result.skipped}</span>
           </div>
-          <div className="tabular-nums">
-            <strong>Errors:</strong> {result.errors}
+          <div className="import-stat">
+            <span className="import-stat-label">Errors</span>
+            <span className="import-stat-value tabular-nums">{result.errors}</span>
           </div>
         </div>
       )}

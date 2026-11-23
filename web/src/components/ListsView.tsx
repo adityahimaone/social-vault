@@ -44,14 +44,17 @@ export function ListsView({ lists, onRefresh, onFilterByList, onNotify }: ListsV
   }
 
   return (
-    <section className="panel" aria-labelledby="lists-heading">
-      <div>
-        <h1 id="lists-heading" style={{ margin: 0, fontSize: 19, fontWeight: 700 }}>
-          Lists
-        </h1>
-        <p style={{ margin: "4px 0 0", fontSize: 14, color: "var(--fg-muted)" }}>
-          Group related bookmarks into curated collections.
-        </p>
+    <section className="glass-panel glass-rim" aria-labelledby="lists-heading">
+      <div className="panel-header">
+        <div>
+          <h1 id="lists-heading" className="panel-title">
+            Lists
+          </h1>
+          <p className="panel-subtitle">
+            Group related bookmarks into curated collections.
+          </p>
+        </div>
+        <span className="panel-count-pill tabular-nums">{lists.length} lists</span>
       </div>
 
       <form onSubmit={handleCreate} className="inline-form">
@@ -84,44 +87,32 @@ export function ListsView({ lists, onRefresh, onFilterByList, onNotify }: ListsV
       </form>
 
       {lists.length === 0 ? (
-        <p style={{ margin: 0, fontSize: 14, color: "var(--fg-muted)" }}>
+        <p className="panel-empty">
           No lists yet. Create one above or import folders from a Netscape HTML export.
         </p>
       ) : (
         <div className="grid-cards">
           {lists.map((list) => (
-            <div key={list.id} className="entity-card">
+            <div key={list.id} className="entity-card glass-rim">
               <button
                 type="button"
+                className="entity-card-btn"
                 onClick={() => onFilterByList(list.name)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  padding: 0,
-                  textAlign: "left",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                  minWidth: 0,
-                  flex: 1,
-                }}
               >
-                <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600, fontSize: 15 }}>
-                  <FolderKanban size={15} aria-hidden="true" style={{ color: "var(--accent-text)" }} />
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {list.name}
-                  </span>
+                <span className="entity-card-title">
+                  <FolderKanban size={15} aria-hidden="true" className="entity-card-icon" />
+                  <span className="entity-card-name">{list.name}</span>
                 </span>
                 {list.description && (
-                  <span style={{ fontSize: 13, color: "var(--fg-secondary)" }}>{list.description}</span>
+                  <span className="entity-card-desc">{list.description}</span>
                 )}
-                <span className="tabular-nums" style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+                <span className="entity-card-meta tabular-nums">
                   {list.count ?? 0} bookmarks
                 </span>
               </button>
               <button
                 type="button"
-                className="btn btn-ghost btn-icon"
+                className="btn btn-ghost btn-icon btn-icon-sm"
                 onClick={() => handleDelete(list)}
                 aria-label={`Delete list ${list.name}`}
               >
