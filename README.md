@@ -87,6 +87,8 @@ curl -X POST http://127.0.0.1:8787/api/bookmarks \
 
 ## MCP Server (`social-vault-mcp`)
 
+Full docs (tools, client setup for agy/dsh, agent tagging workflow, troubleshooting): [docs/mcp.md](docs/mcp.md)
+
 `social-vault-mcp` exposes Social Vault over the Model Context Protocol (`stdio` JSON-RPC) using the official Go SDK (`github.com/modelcontextprotocol/go-sdk`). It talks strictly to the vault's HTTP REST API — it never reads the local SQLite database and does not require `VAULT_PASSWORD`.
 
 ### Build
