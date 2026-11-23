@@ -150,6 +150,18 @@ test("detectPage matches supported X and Threads routes only", () => {
     label: "X Bookmarks",
     source: "extension-bulk-x"
   });
+  assert.deepEqual(extractor.detectPage("https://x.com/i/history/likes"), {
+    platform: "x",
+    pageKind: "likes",
+    label: "X Likes",
+    source: "extension-bulk-x"
+  });
+  assert.deepEqual(extractor.detectPage("https://x.com/i/history/bookmarks"), {
+    platform: "x",
+    pageKind: "bookmarks",
+    label: "X Bookmarks",
+    source: "extension-bulk-x"
+  });
   assert.deepEqual(extractor.detectPage("https://twitter.com/aditya_hima/likes/"), {
     platform: "x",
     pageKind: "likes",

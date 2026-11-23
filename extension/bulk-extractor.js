@@ -112,6 +112,24 @@
         };
       }
 
+      if (cleanPath === "/i/history/likes") {
+        return {
+          platform: "x",
+          pageKind: "likes",
+          label: "X Likes",
+          source: "extension-bulk-x"
+        };
+      }
+
+      if (cleanPath === "/i/history/bookmarks") {
+        return {
+          platform: "x",
+          pageKind: "bookmarks",
+          label: "X Bookmarks",
+          source: "extension-bulk-x"
+        };
+      }
+
       var xLikesMatch = /^\/([A-Za-z0-9_]{1,30})\/likes$/.exec(cleanPath);
       if (xLikesMatch) {
         var handle = xLikesMatch[1];

@@ -1,0 +1,76 @@
+=== WAIT DONE Mon Nov 23 20:01:27 WIB 2026 ===
+--- git status ---
+?? PLAN.md
+?? agy-social-vault-wait-result.txt
+?? run-agy-social-vault.sh
+--- git log ---
+6c30455 feat: build Social Vault v2 MVP (Go + SQLite FTS5 + embedded Vite UI)
+--- agy-social-vault.log tail ---
+Initialized empty Git repository in /Users/adityahimawan/Development/social-vault/.git/
+`gofmt`, `go vet`, dan seluruh unit test Go (`internal/db`, `internal/auth`, `internal/crawler`, `internal/api`) telah lolos. Sedang menunggu penyelesaian kompilasi binary macOS dan Linux `amd64` sebelum menjalankan verifikasi server lokal.
+Aplikasi **Social Vault v2** (Go + SQLite FTS5 + Vite/React/TypeScript) telah selesai dibangun dari nol, diverifikasi secara lokal, dan di-commit ke branch lokal `main` (commit `6c30455`, tanpa `git push`).
+
+---
+
+### 1. Struktur & File yang Dibuat
+
+- **Konfigurasi & Dokumentasi**
+  - [.gitignore](file:///Users/adityahimawan/Development/social-vault/.gitignore) — mengabaikan binary, `.env`/`.env.*` (kecuali `.env.sample`), `data/`, `*.log`, `web/node_modules/`, `web/dist/`
+  - [.env.sample](file:///Users/adityahimawan/Development/social-vault/.env.sample) — contoh variabel env (`PORT`, `DATA_DIR`, `VAULT_PASSWORD`, `VAULT_API_KEY`) tanpa secret asli
+  - [README.md](file:///Users/adityahimawan/Development/social-vault/README.md) — panduan build, env, dan daftar endpoint REST API
+  - [go.mod](file:///Users/adityahimawan/Development/social-vault/go.mod), [go.sum](file:///Users/adityahimawan/Development/social-vault/go.sum) — hanya dependensi `modernc.org/sqlite` (pure Go, tanpa CGO) dan `golang.org/x/net`
+  - [main.go](file:///Users/adityahimawan/Development/social-vault/main.go) — entrypoint HTTP server dengan `//go:embed all:web/dist` dan graceful shutdown
+- **Database & Migrasi**
+  - [migrations/001_init.sql](file:///Users/adityahimawan/Development/social-vault/migrations/001_init.sql), [migrations/embed.go](file:///Users/adityahimawan/Development/social-vault/migrations/embed.go) — skema `bookmarks`, `tags`, `bookmark_tags`, `lists`, `bookmark_lists`, `sessions`, serta tabel virtual `bookmarks_fts` (FTS5 + trigger insert/update/delete)
+  - [internal/db/db.go](file:///Users/adityahimawan/Development/social-vault/internal/db/db.go), [internal/db/bookmarks.go](file:///Users/adityahimawan/Development/social-vault/internal/db/bookmarks.go), [internal/db/tags_lists.go](file:///Users/adityahimawan/Development/social-vault/internal/db/tags_lists.go), [internal/db/sessions.go](file:///Users/adityahimawan/Development/social-vault/internal/db/sessions.go), [internal/db/db_test.go](file:///Users/adityahimawan/Development/social-vault/internal/db/db_test.go)
+- **Auth & Crawler**
+  - [internal/auth/auth.go](file:///Users/adityahimawan/Development/social-vault/internal/auth/auth.go), [internal/auth/auth_test.go](file:///Users/adityahimawan/Development/social-vault/internal/auth/auth_test.go) — session cookie `sv_session` + API key (`Authorization: Bearer` / `X-Api-Key`) dengan constant-time compare
+  - [internal/crawler/crawler.go](file:///Users/adityahimawan/Development/social-vault/internal/crawler/crawler.go), [internal/crawler/crawler_test.go](file:///Users/adityahimawan/Development/social-vault/internal/crawler/crawler_test.go) — HTML metadata fetcher (`<title>`, OpenGraph/Twitter meta, resolusi favicon relatif) tanpa headless Chrome
+- **REST API & Importer**
+  - [internal/api/server.go](file:///Users/adityahimawan/Development/social-vault/internal/api/server.go), [internal/api/bookmarks.go](file:///Users/adityahimawan/Development/social-vault/internal/api/bookmarks.go), [internal/api/tags_lists.go](file:///Users/adityahimawan/Development/social-vault/internal/api/tags_lists.go), [internal/api/importer.go](file:///Users/adityahimawan/Development/social-vault/internal/api/importer.go), [internal/api/api_test.go](file:///Users/adityahimawan/Development/social-vault/internal/api/api_test.go) — CRUD `/api/bookmarks`, `/api/tags`, `/api/lists`, `/api/stats`, `/api/import` (Netscape HTML + Karakeep JSON), `/api/health`, `/api/auth/*`, dan static SPA fallback
+- **Frontend (Vite + React + TypeScript)**
+  - Menggunakan panduan `/ui-ux-pro-max` (Minimalism & Swiss Style, palet Vault dark-blue + emerald, tipografi Inter, `tabular-nums`, aksesibilitas focus ring & kontras 4.5:1+, debounced search, responsif desktop–mobile) dan `/emil-design-eng` (custom `--ease-out` & `--ease-drawer`, nol `transition: all`, `:active` scale `0.97`, modal entry `scale(0.95)`, drawer kanan dengan `--ease-drawer`, hold-to-delete berbasis `clip-path` + fallback keyboard, toast yang pause saat hover/tab tersembunyi, nol animasi pada aksi shortcut keyboard, gating `@media (hover: hover) and (pointer: fine)` & `prefers-reduced-motion`).
+  - [web/package.json](file:///Users/adityahimawan/Development/social-vault/web/package.json), [web/tsconfig.json](file:///Users/adityahimawan/Development/social-vault/web/tsconfig.json), [web/vite.config.ts](file:///Users/adityahimawan/Development/social-vault/web/vite.config.ts), [web/index.html](file:///Users/adityahimawan/Development/social-vault/web/index.html)
+  - [web/src/styles/tokens.css](file:///Users/adityahimawan/Development/social-vault/web/src/styles/tokens.css), [web/src/styles/app.css](file:///Users/adityahimawan/Development/social-vault/web/src/styles/app.css), [web/src/types.ts](file:///Users/adityahimawan/Development/social-vault/web/src/types.ts), [web/src/api.ts](file:///Users/adityahimawan/Development/social-vault/web/src/api.ts), [web/src/main.tsx](file:///Users/adityahimawan/Development/social-vault/web/src/main.tsx), [web/src/App.tsx](file:///Users/adityahimawan/Development/social-vault/web/src/App.tsx)
+  - Komponen: [LoginView.tsx](file:///Users/adityahimawan/Development/social-vault/web/src/components/LoginView.tsx), [Sidebar.tsx](file:///Users/adityahimawan/Development/social-vault/web/src/components/Sidebar.tsx), [StatsBar.tsx](file:///Users/adityahimawan/Development/social-vault/web/src/components/StatsBar.tsx), [BookmarkList.tsx](file:///Users/adityahimawan/Development/social-vault/web/src/components/BookmarkList.tsx), [BookmarkDrawer.tsx](file:///Users/adityahimawan/Development/social-vault/web/src/components/BookmarkDrawer.tsx), [AddBookmarkModal.tsx](file:///Users/adityahimawan/Development/social-vault/web/src/components/AddBookmarkModal.tsx), [TagsView.tsx](file:///Users/adityahimawan/Development/social-vault/web/src/components/TagsView.tsx), [ListsView.tsx](file:///Users/adityahimawan/Development/social-vault/web/src/components/ListsView.tsx), [ImportView.tsx](file:///Users/adityahimawan/Development/social-vault/web/src/components/ImportView.tsx), [Toast.tsx](file:///Users/adityahimawan/Development/social-vault/web/src/components/Toast.tsx)
+
+---
+
+### 2. Hasil `gofmt`, `go vet`, `go test`, dan Build
+
+- **`pnpm --prefix web build`** (`tsc -b && vite build`): lolos tanpa error dan tanpa warning fatal (`dist/index.html` 0.70 kB, `dist/assets/index-LDNXCQkE.css` 16.74 kB, `dist/assets/index-BokVeQ6l.js` 273.81 kB).
+- **`gofmt -l .`**: bersih (`0` file).
+- **`go vet ./...`**: lolos (exit code 0).
+- **`go test -v ./...`**: semua test lolos:
+  - `social-vault/internal/api`: `TestEndToEndAPI`, `TestImportNetscapeAndKarakeep` — **PASS**
+  - `social-vault/internal/auth`: `TestAuthMiddlewareAndSessions` — **PASS**
+  - `social-vault/internal/crawler`: `TestFetcherExtractsMetadata`, `TestFetcherTitleFallback` — **PASS**
+  - `social-vault/internal/db`: `TestBookmarkCRUDAndSearch` — **PASS**
+- **Build & Embed Delta**:
+  - Binary darwin dengan stub `index.html`: `16.249.442` bytes
+  - Binary darwin dengan embed `web/dist/`: `16.546.690` bytes (**+297.248 bytes**)
+  - Cross-compile `GOOS=linux GOARCH=amd64 go build -o social-vault-linux .`: lolos (`17.231.697` bytes, `ELF 64-bit LSB executable, x86-64, statically linked`).
+  - Binary sementara sudah dihapus setelah verifikasi; file `PLAN.md`, `run-agy-social-vault.sh`, dan `agy-social-vault.log` dibiarkan tidak ter-commit di luar commit project.
+
+---
+
+### 3. Hasil Verifikasi Lokal Live Server (`PORT=127.0.0.1:8898`)
+
+Binary `./social-vault` dijalankan dengan `DATA_DIR` temporer, lalu diuji via `curl`:
+- `GET /api/health` -> `HTTP 200` (`{"status":"ok"}`)
+- `GET /api/bookmarks` tanpa auth -> `HTTP 401` (`{"error":"unauthorized"}`)
+- `POST /api/auth/login` -> `HTTP 200` (`{"authenticated":true}`), dan `GET /api/bookmarks` dengan cookie `sv_session` -> `HTTP 200`
+- `POST /api/bookmarks` dengan `{"url":"https://example.com"}` + `Authorization: Bearer ...` -> `HTTP 201` dengan `title: "Example Domain"` dari hasil fetch HTML
+- `GET /api/bookmarks?q=example` -> `HTTP 200`, `total: 1` (mengembalikan bookmark `Example Domain`)
+- `DELETE /api/bookmarks/1` -> `HTTP 200` (`{"deleted":true}`), lalu `GET /api/bookmarks?q=example` -> `HTTP 200`, `total: 0`
+- `GET /` -> `HTTP 200` menyajikan HTML hasil build Vite (`Social Vault`, `<script type="module" crossorigin src="/assets/index-BokVeQ6l.js">`), dan kedua asset `/assets/index-BokVeQ6l.js` serta `/assets/index-LDNXCQkE.css` merespons `HTTP 200`.
+- Proses server uji dimatikan dan `DATA_DIR` temporer sudah dibersihkan.
+
+---
+
+### 4. Yang Belum Dites
+
+Sesuai catatan di `PLAN.md`, deploy ke VPS Linux dan uji integrasi langsung dengan URL X/Threads asli serta harvester eksternal belum dijalankan di tahap ini dan akan dilakukan terpisah oleh Muse.
+AGY_EXIT:0
+--- agy CLI still running? ---
+agy CLI not running

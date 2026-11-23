@@ -1,0 +1,19 @@
+=== WAIT DONE Mon Nov 23 22:40:37 WIB 2026 ===
+--- git status ---
+?? PLAN-MCP-EXTENSION.md
+?? PLAN-X-THREADS-BULK.md
+?? PLAN.md
+?? agy-bulk-wait-result.txt
+?? agy-mcp-extension-wait-result.txt
+?? agy-social-vault-wait-result.txt
+?? run-agy-social-vault-bulk.sh
+?? run-agy-social-vault-mcp-extension.sh
+?? run-agy-social-vault.sh
+?? wait-agy-social-vault-bulk.sh
+--- git log ---
+f1388a5 feat(extension): add X and Threads bulk fetch panel
+db5120f feat: add stdio MCP server and MV3 browser extension
+6c30455 feat: build Social Vault v2 MVP (Go + SQLite FTS5 + embedded Vite UI)
+--- agy-bulk.log tail ---
+--- agy CLI still running? ---
+agy CLI not running
