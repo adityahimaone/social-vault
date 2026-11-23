@@ -46,6 +46,7 @@ func TestEndToEndAPI(t *testing.T) {
 		_, _ = w.Write([]byte(`<!doctype html><html><head>
 			<title>Local Crawled Page</title>
 			<meta name="description" content="Crawled description text" />
+			<meta property="og:image" content="/og-cover.png" />
 			<link rel="icon" href="/favicon.svg" />
 		</head><body>ok</body></html>`))
 	}))
@@ -113,6 +114,9 @@ func TestEndToEndAPI(t *testing.T) {
 	}
 	if created.Title != "Local Crawled Page" || created.Description != "Crawled description text" {
 		t.Fatalf("unexpected crawled metadata: %+v", created)
+	}
+	if created.ImageURL != target.URL+"/og-cover.png" {
+		t.Fatalf("expected crawled og:image %q, got %q", target.URL+"/og-cover.png", created.ImageURL)
 	}
 
 	// 5. Search via session cookie -> finds created bookmark

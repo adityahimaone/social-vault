@@ -19,6 +19,7 @@ func TestFetcherExtractsMetadata(t *testing.T) {
   <meta property="og:title" content="OpenGraph   Title" />
   <meta property="og:description" content="Helpful summary for Social Vault." />
   <meta property="og:site_name" content="Example Blog" />
+  <meta property="og:image" content="/images/cover.jpg" />
   <link rel="icon" href="/assets/icon.png" />
 </head>
 <body><p>Hello</p></body>
@@ -42,6 +43,26 @@ func TestFetcherExtractsMetadata(t *testing.T) {
 	}
 	if meta.FaviconURL != srv.URL+"/assets/icon.png" {
 		t.Fatalf("expected resolved favicon url, got %q", meta.FaviconURL)
+	}
+	if meta.ImageURL != srv.URL+"/images/cover.jpg" {
+		t.Fatalf("expected resolved og:image url, got %q", meta.ImageURL)
+	}
+}
+
+func TestFetcherTwitterImageFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html><head><title>Tweet</title><meta name="twitter:image" content="https://pbs.twimg.com/media/demo.jpg" /></head><body></body></html>`))
+	}))
+	defer srv.Close()
+
+	f := crawler.NewFetcher(srv.Client())
+	meta, err := f.Fetch(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("fetch twitter image: %v", err)
+	}
+	if meta.ImageURL != "https://pbs.twimg.com/media/demo.jpg" {
+		t.Fatalf("expected twitter:image url, got %q", meta.ImageURL)
 	}
 }
 

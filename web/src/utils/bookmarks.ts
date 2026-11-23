@@ -1,0 +1,120 @@
+import type { Bookmark, LibrarySection, SmartFilter, SortMode } from "../types";
+
+const STOPWORDS = new Set([
+  "the", "and", "for", "with", "that", "this", "from", "into", "your", "about",
+  "have", "has", "was", "were", "are", "how", "why", "what", "when", "where",
+  "who", "will", "just", "more", "some", "than", "then", "they", "them", "been",
+  "http", "https", "www", "com", "org", "net", "post", "status", "thread",
+]);
+
+const DOMAIN_PALETTE = [
+  { hue: 199, accent: "rgba(56, 189, 248, 0.24)" },
+  { hue: 221, accent: "rgba(99, 102, 241, 0.24)" },
+  { hue: 172, accent: "rgba(20, 184, 166, 0.22)" },
+  { hue: 158, accent: "rgba(16, 185, 129, 0.22)" },
+  { hue: 256, accent: "rgba(139, 92, 246, 0.22)" },
+  { hue: 210, accent: "rgba(100, 116, 139, 0.24)" },
+];
+
+export function domainFromURL(raw: string): string {
+  try {
+    return new URL(raw).hostname.replace(/^www\./, "");
+  } catch {
+    return raw;
+  }
+}
+
+export function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+export function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function isWithinDays(iso: string, days: number): boolean {
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return false;
+  return Date.now() - ts <= days * 24 * 60 * 60 * 1000;
+}
+
+export function getDomainTone(domain: string): { hue: number; accent: string; initial: string } {
+  const clean = domain.trim().toLowerCase() || "vault";
+  let hash = 0;
+  for (let i = 0; i < clean.length; i++) {
+    hash = (hash * 31 + clean.charCodeAt(i)) >>> 0;
+  }
+  const pick = DOMAIN_PALETTE[hash % DOMAIN_PALETTE.length];
+  const initialMatch = clean.match(/[a-z0-9]/i);
+  const initial = initialMatch ? initialMatch[0].toUpperCase() : "V";
+  return { ...pick, initial };
+}
+
+export function buildSimilarQuery(bookmark: Bookmark): string {
+  const titleWords = bookmark.title
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[^a-z0-9\s-]/gi, " ")
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 3 && !STOPWORDS.has(w));
+
+  const unique: string[] = [];
+  for (const w of titleWords) {
+    if (!unique.includes(w)) unique.push(w);
+    if (unique.length >= 2) break;
+  }
+  if (unique.length > 0) {
+    return unique.join(" ");
+  }
+  if (bookmark.tags.length > 0) {
+    return bookmark.tags[0].name;
+  }
+  const site = (bookmark.site_name || domainFromURL(bookmark.url)).split(".")[0];
+  return site && site.length >= 2 ? site : "";
+}
+
+export function filterAndSortBookmarks(
+  items: Bookmark[],
+  opts: {
+    librarySection: LibrarySection;
+    smartFilters: SmartFilter[];
+    sortMode: SortMode;
+  }
+): Bookmark[] {
+  const { librarySection, smartFilters, sortMode } = opts;
+
+  const filtered = items.filter((item) => {
+    if (librarySection === "untagged" && item.tags.length > 0) return false;
+    if (librarySection === "recent" && !isWithinDays(item.created_at, 7)) return false;
+    if (librarySection === "archived" && !item.archived) return false;
+
+    for (const sf of smartFilters) {
+      if (sf === "this_week" && !isWithinDays(item.created_at, 7)) return false;
+      if (sf === "with_notes" && item.notes.trim().length === 0) return false;
+      if (sf === "has_media" && !item.image_url) return false;
+      if (sf === "unlisted" && item.lists.length > 0) return false;
+    }
+    return true;
+  });
+
+  if (sortMode === "newest") {
+    return [...filtered].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id);
+  }
+  if (sortMode === "oldest") {
+    return [...filtered].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id);
+  }
+  return [...filtered].sort((a, b) =>
+    (a.title || a.url).localeCompare(b.title || b.url, undefined, { sensitivity: "base" })
+  );
+}

@@ -22,6 +22,7 @@ type Metadata struct {
 	Title       string
 	Description string
 	FaviconURL  string
+	ImageURL    string
 	SiteName    string
 }
 
@@ -96,22 +97,28 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (Metadata, error) {
 	if parsedMeta.FaviconURL != "" {
 		meta.FaviconURL = parsedMeta.FaviconURL
 	}
+	if parsedMeta.ImageURL != "" {
+		meta.ImageURL = parsedMeta.ImageURL
+	}
 
 	return meta, nil
 }
 
 func parseHTML(r io.Reader, baseURL *url.URL) Metadata {
 	var (
-		meta      Metadata
-		titleTag  strings.Builder
-		inTitle   bool
-		ogTitle   string
-		twTitle   string
-		ogDesc    string
-		metaDesc  string
-		twDesc    string
-		iconHref  string
-		appleIcon string
+		meta          Metadata
+		titleTag      strings.Builder
+		inTitle       bool
+		ogTitle       string
+		twTitle       string
+		ogDesc        string
+		metaDesc      string
+		twDesc        string
+		ogImage       string
+		ogImageSecure string
+		twImage       string
+		iconHref      string
+		appleIcon     string
 	)
 
 	z := html.NewTokenizer(r)
@@ -148,6 +155,12 @@ func parseHTML(r io.Reader, baseURL *url.URL) Metadata {
 					twDesc = content
 				case prop == "og:site_name" && meta.SiteName == "":
 					meta.SiteName = content
+				case (prop == "og:image" || mname == "og:image") && ogImage == "":
+					ogImage = content
+				case (prop == "og:image:secure_url" || mname == "og:image:secure_url") && ogImageSecure == "":
+					ogImageSecure = content
+				case (prop == "twitter:image" || mname == "twitter:image" || prop == "twitter:image:src" || mname == "twitter:image:src") && twImage == "":
+					twImage = content
 				}
 			case "link":
 				rel := strings.ToLower(attrVal(t.Attr, "rel"))
@@ -182,6 +195,13 @@ done:
 	if chosenIcon != "" {
 		if resolved := resolveURL(baseURL, chosenIcon); resolved != "" {
 			meta.FaviconURL = resolved
+		}
+	}
+
+	chosenImage := firstNonEmpty(ogImage, ogImageSecure, twImage)
+	if chosenImage != "" {
+		if resolved := resolveURL(baseURL, chosenImage); resolved != "" {
+			meta.ImageURL = resolved
 		}
 	}
 	return meta

@@ -20,6 +20,7 @@ export interface Bookmark {
   description: string;
   notes: string;
   favicon_url: string;
+  image_url?: string;
   site_name: string;
   source: string;
   archived: boolean;
@@ -48,3 +49,7 @@ export interface ImportResult {
 
 export type ActiveView = "bookmarks" | "tags" | "lists" | "import";
 export type ArchivedFilter = "all" | "false" | "true";
+export type LibrarySection = "all" | "untagged" | "recent" | "archived";
+export type SmartFilter = "this_week" | "with_notes" | "has_media" | "unlisted";
+export type SortMode = "newest" | "oldest" | "title";
+export type GridDensity = "comfortable" | "compact";

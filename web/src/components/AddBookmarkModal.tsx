@@ -168,7 +168,7 @@ export function AddBookmarkModal({
               required
             />
             <span className="field-hint">
-              Title, description, and favicon are fetched automatically when available.
+              Title, description, thumbnail preview, and favicon are fetched automatically when available.
             </span>
           </div>
 

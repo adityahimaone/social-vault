@@ -111,3 +111,36 @@ func TestBookmarkCRUDAndSearch(t *testing.T) {
 		t.Fatalf("expected 0 results after delete, got %d", total)
 	}
 }
+
+func TestBookmarkNullableImageURL(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+
+	noImg, err := store.CreateBookmark(ctx, db.CreateBookmarkInput{
+		URL:   "https://example.com/no-image",
+		Title: "Without Image",
+	})
+	if err != nil {
+		t.Fatalf("create without image: %v", err)
+	}
+	if noImg.ImageURL != "" {
+		t.Fatalf("expected empty image_url, got %q", noImg.ImageURL)
+	}
+
+	withImg, err := store.CreateBookmark(ctx, db.CreateBookmarkInput{
+		URL:      "https://example.com/with-image",
+		Title:    "With Image",
+		ImageURL: "https://example.com/cover.png",
+	})
+	if err != nil {
+		t.Fatalf("create with image: %v", err)
+	}
+	if withImg.ImageURL != "https://example.com/cover.png" {
+		t.Fatalf("expected image_url, got %q", withImg.ImageURL)
+	}
+
+	listed, total, err := store.ListBookmarks(ctx, db.BookmarkFilter{})
+	if err != nil || total != 2 || len(listed) != 2 {
+		t.Fatalf("list bookmarks: err=%v total=%d len=%d", err, total, len(listed))
+	}
+}

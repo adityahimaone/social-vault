@@ -31,6 +31,7 @@ type Bookmark struct {
 	Description string `json:"description"`
 	Notes       string `json:"notes"`
 	FaviconURL  string `json:"favicon_url"`
+	ImageURL    string `json:"image_url,omitempty"`
 	SiteName    string `json:"site_name"`
 	Source      string `json:"source"`
 	Archived    bool   `json:"archived"`
@@ -55,6 +56,7 @@ type CreateBookmarkInput struct {
 	Description string
 	Notes       string
 	FaviconURL  string
+	ImageURL    string
 	SiteName    string
 	Source      string
 	Archived    bool
@@ -106,14 +108,15 @@ func (s *Store) CreateBookmark(ctx context.Context, in CreateBookmarkInput) (*Bo
 	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO bookmarks (url, title, description, notes, favicon_url, site_name, source, archived, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO bookmarks (url, title, description, notes, favicon_url, image_url, site_name, source, archived, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		urlStr,
 		strings.TrimSpace(in.Title),
 		strings.TrimSpace(in.Description),
 		strings.TrimSpace(in.Notes),
 		strings.TrimSpace(in.FaviconURL),
+		nullableText(in.ImageURL),
 		strings.TrimSpace(in.SiteName),
 		source,
 		boolToInt(in.Archived),
@@ -152,7 +155,7 @@ func (s *Store) CreateBookmark(ctx context.Context, in CreateBookmarkInput) (*Bo
 
 func (s *Store) GetBookmark(ctx context.Context, id int64) (*Bookmark, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, url, title, description, notes, favicon_url, site_name, source, archived, created_at, updated_at
+		SELECT id, url, title, description, notes, favicon_url, image_url, site_name, source, archived, created_at, updated_at
 		FROM bookmarks
 		WHERE id = ?
 	`, id)
@@ -173,7 +176,7 @@ func (s *Store) GetBookmark(ctx context.Context, id int64) (*Bookmark, error) {
 
 func (s *Store) GetBookmarkByURL(ctx context.Context, rawURL string) (*Bookmark, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, url, title, description, notes, favicon_url, site_name, source, archived, created_at, updated_at
+		SELECT id, url, title, description, notes, favicon_url, image_url, site_name, source, archived, created_at, updated_at
 		FROM bookmarks
 		WHERE url = ?
 	`, strings.TrimSpace(rawURL))
@@ -263,7 +266,7 @@ func (s *Store) ListBookmarks(ctx context.Context, f BookmarkFilter) ([]Bookmark
 	}
 
 	selectSQL := fmt.Sprintf(`
-		SELECT DISTINCT b.id, b.url, b.title, b.description, b.notes, b.favicon_url, b.site_name, b.source, b.archived, b.created_at, b.updated_at
+		SELECT DISTINCT b.id, b.url, b.title, b.description, b.notes, b.favicon_url, b.image_url, b.site_name, b.source, b.archived, b.created_at, b.updated_at
 		FROM bookmarks b
 		%s
 		%s
@@ -595,6 +598,7 @@ type rowScanner interface {
 func scanBookmark(r rowScanner) (Bookmark, error) {
 	var b Bookmark
 	var archivedInt int
+	var imageURL sql.NullString
 	err := r.Scan(
 		&b.ID,
 		&b.URL,
@@ -602,6 +606,7 @@ func scanBookmark(r rowScanner) (Bookmark, error) {
 		&b.Description,
 		&b.Notes,
 		&b.FaviconURL,
+		&imageURL,
 		&b.SiteName,
 		&b.Source,
 		&archivedInt,
@@ -611,6 +616,7 @@ func scanBookmark(r rowScanner) (Bookmark, error) {
 	if err != nil {
 		return Bookmark{}, err
 	}
+	b.ImageURL = imageURL.String
 	b.Archived = archivedInt != 0
 	b.Tags = make([]Tag, 0)
 	b.Lists = make([]List, 0)
@@ -639,4 +645,12 @@ func boolToInt(v bool) int {
 		return 1
 	}
 	return 0
+}
+
+func nullableText(s string) sql.NullString {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: trimmed, Valid: true}
 }

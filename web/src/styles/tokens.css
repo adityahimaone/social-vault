@@ -16,7 +16,8 @@
   --radius-xl: 28px;
   --radius-pill: 999px;
 
-  --sidebar-width: 268px;
+  --sidebar-width: 256px;
+  --inspector-width: 344px;
 
   /* 3-tier optical blur & saturation budget */
   --glass-blur-heavy: 24px;

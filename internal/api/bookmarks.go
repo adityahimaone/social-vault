@@ -45,6 +45,7 @@ func (s *Server) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 		Description string   `json:"description"`
 		Notes       string   `json:"notes"`
 		FaviconURL  string   `json:"favicon_url"`
+		ImageURL    string   `json:"image_url"`
 		SiteName    string   `json:"site_name"`
 		Source      string   `json:"source"`
 		Archived    bool     `json:"archived"`
@@ -73,6 +74,14 @@ func (s *Server) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 	title := strings.TrimSpace(body.Title)
 	desc := strings.TrimSpace(body.Description)
 	favicon := strings.TrimSpace(body.FaviconURL)
+	imageURL := strings.TrimSpace(body.ImageURL)
+	if imageURL != "" {
+		if validImg, ierr := validateHTTPURL(imageURL); ierr == nil {
+			imageURL = validImg
+		} else {
+			imageURL = ""
+		}
+	}
 	siteName := strings.TrimSpace(body.SiteName)
 
 	if title == "" || desc == "" || favicon == "" {
@@ -88,6 +97,9 @@ func (s *Server) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 			}
 			if favicon == "" {
 				favicon = meta.FaviconURL
+			}
+			if imageURL == "" {
+				imageURL = meta.ImageURL
 			}
 			if siteName == "" {
 				siteName = meta.SiteName
@@ -109,6 +121,7 @@ func (s *Server) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 		Description: desc,
 		Notes:       body.Notes,
 		FaviconURL:  favicon,
+		ImageURL:    imageURL,
 		SiteName:    siteName,
 		Source:      body.Source,
 		Archived:    body.Archived,

@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { LayoutGrid, List as ListIcon, Menu, Plus, RotateCcw, Search, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RotateCcw, X } from "lucide-react";
 import { api, ApiError, setUnauthorizedHandler } from "./api";
 import { AddBookmarkModal } from "./components/AddBookmarkModal";
-import { BookmarkDrawer } from "./components/BookmarkDrawer";
+import { BookmarkInspector } from "./components/BookmarkInspector";
 import { BookmarkList } from "./components/BookmarkList";
+import { DashboardToolbar } from "./components/DashboardToolbar";
 import { AmbientBackdrop } from "./components/glass/AmbientBackdrop";
-import { GlassSegmented } from "./components/glass/GlassSegmented";
 import { ImportView } from "./components/ImportView";
 import { ListsView } from "./components/ListsView";
 import { LoginView } from "./components/LoginView";
@@ -13,31 +13,87 @@ import { Sidebar } from "./components/Sidebar";
 import { StatsBar } from "./components/StatsBar";
 import { TagsView } from "./components/TagsView";
 import { ToastViewport, type ToastItem } from "./components/Toast";
-import type { ActiveView, ArchivedFilter, Bookmark, List, Stats, Tag } from "./types";
+import type {
+  ActiveView,
+  ArchivedFilter,
+  Bookmark,
+  GridDensity,
+  LibrarySection,
+  List,
+  SmartFilter,
+  SortMode,
+  Stats,
+  Tag,
+} from "./types";
+import { filterAndSortBookmarks, isWithinDays } from "./utils/bookmarks";
 
-function getInitialTheme(): "dark" | "light" {
+function readStorage<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
-    const saved = localStorage.getItem("sv_theme");
-    if (saved === "light" || saved === "dark") return saved;
+    const saved = localStorage.getItem(key);
+    if (saved && (allowed as readonly string[]).includes(saved)) {
+      return saved as T;
+    }
   } catch {
     // ignore storage restriction
+  }
+  return fallback;
+}
+
+function writeStorage(key: string, val: string) {
+  try {
+    localStorage.setItem(key, val);
+  } catch {
+    // ignore storage restriction
+  }
+}
+
+function getInitialTheme(): "dark" | "light" {
+  const saved = readStorage("sv_theme", ["dark", "light"] as const, "dark");
+  if (saved === "light" || saved === "dark") {
+    try {
+      if (localStorage.getItem("sv_theme")) return saved;
+    } catch {
+      // ignore
+    }
   }
   return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
-function getInitialViewMode(): "grid" | "list" {
-  try {
-    const saved = localStorage.getItem("sv_view_mode");
-    if (saved === "grid" || saved === "list") return saved;
-  } catch {
-    // ignore storage restriction
-  }
-  return "grid";
+function useIsMobileInspector(): boolean {
+  const [mobile, setMobile] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth < 1200 : false
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1199px)");
+    const onChange = () => setMobile(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return mobile;
 }
 
 export function App() {
+  const isMobileInspector = useIsMobileInspector();
+
   const [theme, setTheme] = useState<"dark" | "light">(getInitialTheme);
-  const [viewMode, setViewMode] = useState<"grid" | "list">(getInitialViewMode);
+  const [viewMode, setViewMode] = useState<"grid" | "list">(() =>
+    readStorage("sv_view_mode", ["grid", "list"] as const, "grid")
+  );
+  const [sortMode, setSortMode] = useState<SortMode>(() =>
+    readStorage("sv_sort_mode", ["newest", "oldest", "title"] as const, "newest")
+  );
+  const [density, setDensity] = useState<GridDensity>(() =>
+    readStorage("sv_density", ["comfortable", "compact"] as const, "comfortable")
+  );
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() =>
+    readStorage("sv_sidebar_collapsed", ["true", "false"] as const, "false") === "true"
+  );
+  const [inspectorOpen, setInspectorOpen] = useState<boolean>(() =>
+    readStorage("sv_inspector_open", ["true", "false"] as const, "true") === "true"
+  );
+  const [fullBleed, setFullBleed] = useState(false);
+
   const [authState, setAuthState] = useState<{
     loading: boolean;
     authenticated: boolean;
@@ -47,6 +103,8 @@ export function App() {
   const [activeView, setActiveView] = useState<ActiveView>("bookmarks");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  const [librarySection, setLibrarySection] = useState<LibrarySection>("all");
+  const [smartFilters, setSmartFilters] = useState<SmartFilter[]>([]);
   const [searchInput, setSearchInput] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [archivedFilter, setArchivedFilter] = useState<ArchivedFilter>("all");
@@ -56,37 +114,35 @@ export function App() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [totalBookmarks, setTotalBookmarks] = useState(0);
   const [loadingBookmarks, setLoadingBookmarks] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const [tags, setTags] = useState<Tag[]>([]);
   const [lists, setLists] = useState<List[]>([]);
 
   const [selectedBookmark, setSelectedBookmark] = useState<Bookmark | null>(null);
-  const [drawerInstant, setDrawerInstant] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [addModalInstant, setAddModalInstant] = useState(false);
 
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [toastPaused, setToastPaused] = useState(false);
   const toastIDRef = useRef(1);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const sidebarSearchRef = useRef<HTMLInputElement | null>(null);
+  const toolbarSearchRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     document.documentElement.style.colorScheme = theme;
-    try {
-      localStorage.setItem("sv_theme", theme);
-    } catch {
-      // ignore storage restriction
-    }
+    writeStorage("sv_theme", theme);
   }, [theme]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem("sv_view_mode", viewMode);
-    } catch {
-      // ignore storage restriction
-    }
-  }, [viewMode]);
+  useEffect(() => writeStorage("sv_view_mode", viewMode), [viewMode]);
+  useEffect(() => writeStorage("sv_sort_mode", sortMode), [sortMode]);
+  useEffect(() => writeStorage("sv_density", density), [density]);
+  useEffect(
+    () => writeStorage("sv_sidebar_collapsed", String(sidebarCollapsed)),
+    [sidebarCollapsed]
+  );
+  useEffect(() => writeStorage("sv_inspector_open", String(inspectorOpen)), [inspectorOpen]);
 
   const notify = useCallback((message: string, tone: "success" | "error" | "info" = "info") => {
     const id = toastIDRef.current++;
@@ -132,7 +188,7 @@ export function App() {
   useEffect(() => {
     const t = window.setTimeout(() => {
       setDebouncedQuery(searchInput.trim());
-    }, 240);
+    }, 220);
     return () => window.clearTimeout(t);
   }, [searchInput]);
 
@@ -153,7 +209,8 @@ export function App() {
             archived: archivedFilter,
             tag: selectedTag,
             list: selectedList,
-            limit: 100,
+            limit: 200,
+            offset: 0,
           },
           signal
         );
@@ -169,6 +226,31 @@ export function App() {
     [debouncedQuery, archivedFilter, selectedTag, selectedList, notify]
   );
 
+  async function handleLoadMore() {
+    if (loadingMore || bookmarks.length >= totalBookmarks) return;
+    setLoadingMore(true);
+    try {
+      const res = await api.listBookmarks({
+        q: debouncedQuery,
+        archived: archivedFilter,
+        tag: selectedTag,
+        list: selectedList,
+        limit: 200,
+        offset: bookmarks.length,
+      });
+      setBookmarks((prev) => {
+        const seen = new Set(prev.map((b) => b.id));
+        const next = res.items.filter((b) => !seen.has(b.id));
+        return [...prev, ...next];
+      });
+      setTotalBookmarks(res.total);
+    } catch (err) {
+      notify(err instanceof ApiError ? err.message : "Failed to load more", "error");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
   useEffect(() => {
     if (!authState.authenticated) return;
     void refreshMetadata();
@@ -181,6 +263,45 @@ export function App() {
     return () => ctrl.abort();
   }, [authState.authenticated, refreshBookmarks]);
 
+  const visibleBookmarks = useMemo(
+    () =>
+      filterAndSortBookmarks(bookmarks, {
+        librarySection,
+        smartFilters,
+        sortMode,
+      }),
+    [bookmarks, librarySection, smartFilters, sortMode]
+  );
+
+  const libraryCounts = useMemo(() => {
+    let untagged = 0;
+    let recent = 0;
+    let withThumb = 0;
+    for (const b of bookmarks) {
+      if (b.tags.length === 0) untagged++;
+      if (isWithinDays(b.created_at, 7)) recent++;
+      if (b.image_url) withThumb++;
+    }
+    return {
+      all: stats?.total ?? totalBookmarks,
+      untagged,
+      recent,
+      archived: stats?.archived ?? 0,
+      withThumb,
+    };
+  }, [bookmarks, stats, totalBookmarks]);
+
+  const focusSearchInput = useCallback(() => {
+    setActiveView("bookmarks");
+    window.setTimeout(() => {
+      if (sidebarCollapsed || fullBleed || window.innerWidth < 1024) {
+        toolbarSearchRef.current?.focus();
+      } else {
+        sidebarSearchRef.current?.focus();
+      }
+    }, 0);
+  }, [sidebarCollapsed, fullBleed]);
+
   useEffect(() => {
     if (!authState.authenticated) return;
     function onKeyDown(e: KeyboardEvent) {
@@ -190,21 +311,69 @@ export function App() {
         target?.tagName === "TEXTAREA" ||
         target?.tagName === "SELECT" ||
         target?.isContentEditable;
-      if (isInput || addModalOpen || selectedBookmark) return;
+      if (isInput || addModalOpen) return;
 
       if (e.key === "/") {
         e.preventDefault();
-        setActiveView("bookmarks");
-        searchInputRef.current?.focus();
+        focusSearchInput();
       } else if (e.key === "n") {
         e.preventDefault();
         setAddModalInstant(true);
         setAddModalOpen(true);
+      } else if (e.key === "f") {
+        e.preventDefault();
+        setFullBleed((v) => !v);
+      } else if (e.key === "i") {
+        e.preventDefault();
+        if (fullBleed) setFullBleed(false);
+        setInspectorOpen((v) => !v);
+      } else if (e.key === "[") {
+        e.preventDefault();
+        if (fullBleed) setFullBleed(false);
+        setSidebarCollapsed((v) => !v);
+      } else if (e.key === "Escape" && fullBleed) {
+        e.preventDefault();
+        setFullBleed(false);
+      } else if ((e.key === "j" || e.key === "k") && activeView === "bookmarks" && visibleBookmarks.length > 0) {
+        e.preventDefault();
+        const idx = selectedBookmark
+          ? visibleBookmarks.findIndex((b) => b.id === selectedBookmark.id)
+          : -1;
+        const nextIdx =
+          e.key === "j"
+            ? Math.min(visibleBookmarks.length - 1, idx + 1)
+            : Math.max(0, idx <= 0 ? 0 : idx - 1);
+        setSelectedBookmark(visibleBookmarks[nextIdx]);
+        if (!isMobileInspector) setInspectorOpen(true);
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [authState.authenticated, addModalOpen, selectedBookmark]);
+  }, [
+    authState.authenticated,
+    addModalOpen,
+    fullBleed,
+    activeView,
+    visibleBookmarks,
+    selectedBookmark,
+    isMobileInspector,
+    focusSearchInput,
+  ]);
+
+  function handleSelectLibrarySection(section: LibrarySection) {
+    setLibrarySection(section);
+    if (section === "archived") {
+      setArchivedFilter("true");
+    } else if (archivedFilter === "true") {
+      setArchivedFilter("all");
+    }
+  }
+
+  function handleToggleSmartFilter(sf: SmartFilter) {
+    setSmartFilters((prev) =>
+      prev.includes(sf) ? prev.filter((item) => item !== sf) : [...prev, sf]
+    );
+  }
 
   async function handleLogout() {
     await api.logout();
@@ -229,6 +398,8 @@ export function App() {
   function clearFilters() {
     setSearchInput("");
     setDebouncedQuery("");
+    setLibrarySection("all");
+    setSmartFilters([]);
     setArchivedFilter("all");
     setSelectedTag("");
     setSelectedList("");
@@ -258,215 +429,223 @@ export function App() {
   }
 
   const hasActiveFilters = Boolean(
-    debouncedQuery || archivedFilter !== "all" || selectedTag || selectedList
+    debouncedQuery ||
+      archivedFilter !== "all" ||
+      librarySection !== "all" ||
+      smartFilters.length > 0 ||
+      selectedTag ||
+      selectedList
   );
 
+  const effectiveSidebarCollapsed = fullBleed || sidebarCollapsed;
+  const effectiveInspectorOpen =
+    !fullBleed && (isMobileInspector ? Boolean(selectedBookmark) : inspectorOpen);
+
   return (
-    <div className="app-shell">
+    <div
+      className={[
+        "app-shell",
+        effectiveSidebarCollapsed ? "is-sidebar-collapsed" : "",
+        effectiveInspectorOpen && !isMobileInspector ? "is-inspector-open" : "",
+        fullBleed ? "is-full-bleed" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <a className="skip-link" href="#vault-main">
+        Skip to bookmarks
+      </a>
+
       <AmbientBackdrop />
 
       <Sidebar
         open={mobileMenuOpen}
+        collapsed={effectiveSidebarCollapsed}
         onClose={() => setMobileMenuOpen(false)}
         activeView={activeView}
         onSelectView={setActiveView}
+        librarySection={librarySection}
+        onSelectLibrarySection={handleSelectLibrarySection}
+        smartFilters={smartFilters}
+        onToggleSmartFilter={handleToggleSmartFilter}
         selectedTag={selectedTag}
         selectedList={selectedList}
         onSelectTagFilter={setSelectedTag}
         onSelectListFilter={setSelectedList}
+        searchInput={searchInput}
+        onSearchChange={setSearchInput}
+        searchInputRef={sidebarSearchRef}
         tags={tags}
         lists={lists}
-        totalBookmarks={stats?.total ?? totalBookmarks}
+        counts={libraryCounts}
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
         onLogout={handleLogout}
       />
 
       <div className="main-area">
-        <header className="topbar glass-rim">
-          <button
-            type="button"
-            className="btn btn-ghost btn-icon mobile-menu-btn"
-            onClick={() => setMobileMenuOpen(true)}
-            aria-label="Open navigation menu"
-          >
-            <Menu size={18} aria-hidden="true" />
-          </button>
+        <DashboardToolbar
+          activeView={activeView}
+          onSelectView={setActiveView}
+          librarySection={librarySection}
+          selectedTag={selectedTag}
+          selectedList={selectedList}
+          visibleCount={visibleBookmarks.length}
+          totalCount={totalBookmarks}
+          searchInput={searchInput}
+          onSearchChange={setSearchInput}
+          toolbarSearchRef={toolbarSearchRef}
+          onFocusSearch={focusSearchInput}
+          sidebarCollapsed={effectiveSidebarCollapsed}
+          onToggleSidebar={() => {
+            if (fullBleed) {
+              setFullBleed(false);
+              setSidebarCollapsed(false);
+            } else {
+              setSidebarCollapsed((v) => !v);
+            }
+          }}
+          onOpenMobileMenu={() => setMobileMenuOpen(true)}
+          inspectorOpen={inspectorOpen}
+          onToggleInspector={() => {
+            if (fullBleed) {
+              setFullBleed(false);
+              setInspectorOpen(true);
+            } else {
+              setInspectorOpen((v) => !v);
+            }
+          }}
+          fullBleed={fullBleed}
+          onToggleFullBleed={() => setFullBleed((v) => !v)}
+          viewMode={viewMode}
+          onChangeViewMode={setViewMode}
+          archivedFilter={archivedFilter}
+          onChangeArchivedFilter={(f) => {
+            setArchivedFilter(f);
+            if (f !== "true" && librarySection === "archived") {
+              setLibrarySection("all");
+            }
+          }}
+          smartFilters={smartFilters}
+          onToggleSmartFilter={handleToggleSmartFilter}
+          sortMode={sortMode}
+          onChangeSortMode={setSortMode}
+          density={density}
+          onChangeDensity={setDensity}
+          theme={theme}
+          onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+          hasActiveFilters={hasActiveFilters}
+          onClearFilters={clearFilters}
+          onOpenAdd={() => {
+            setAddModalInstant(false);
+            setAddModalOpen(true);
+          }}
+          onLogout={handleLogout}
+        />
 
-          <div className="search-wrap">
-            <Search size={16} className="search-icon" aria-hidden="true" />
-            <label className="sr-only" htmlFor="vault-search">
-              Search bookmarks
-            </label>
-            <input
-              ref={searchInputRef}
-              id="vault-search"
-              type="search"
-              className="input search-input"
-              placeholder="Search titles, notes, URLs..."
-              value={searchInput}
-              onChange={(e) => {
-                setSearchInput(e.target.value);
-                if (activeView !== "bookmarks") setActiveView("bookmarks");
-              }}
-            />
-            {searchInput ? (
-              <button
-                type="button"
-                className="search-clear-btn"
-                onClick={() => {
-                  setSearchInput("");
-                  setDebouncedQuery("");
-                  searchInputRef.current?.focus();
-                }}
-                aria-label="Clear search"
-              >
-                <X size={14} aria-hidden="true" />
-              </button>
-            ) : (
-              <span className="search-kbd" aria-hidden="true">
-                /
-              </span>
-            )}
-          </div>
-
-          <div className="topbar-actions">
-            <button
-              type="button"
-              className={`btn btn-glass ${activeView === "import" ? "is-active-nav" : ""}`}
-              aria-current={activeView === "import" ? "page" : undefined}
-              onClick={() => setActiveView("import")}
-            >
-              <Upload size={15} aria-hidden="true" />
-              <span className="topbar-btn-label">Import</span>
-            </button>
-
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => {
-                setAddModalInstant(false);
-                setAddModalOpen(true);
-              }}
-            >
-              <Plus size={16} aria-hidden="true" />
-              <span>Save URL</span>
-              <span className="btn-kbd" aria-hidden="true">
-                N
-              </span>
-            </button>
-          </div>
-        </header>
-
-        <main className="content-container">
+        <main id="vault-main" className="content-container">
           {activeView === "bookmarks" && (
             <>
-              <StatsBar
-                stats={stats}
-                activeArchivedFilter={archivedFilter}
-                selectedTag={selectedTag}
-                onSelectArchived={(f) => setArchivedFilter(f)}
-                onSelectTag={(name) =>
-                  setSelectedTag((prev) =>
-                    prev.toLowerCase() === name.toLowerCase() ? "" : name
-                  )
-                }
-              />
+              {!fullBleed && (
+                <StatsBar
+                  stats={stats}
+                  activeArchivedFilter={archivedFilter}
+                  selectedTag={selectedTag}
+                  onSelectArchived={(f) => {
+                    setArchivedFilter(f);
+                    if (f === "true") setLibrarySection("archived");
+                    else if (librarySection === "archived") setLibrarySection("all");
+                  }}
+                  onSelectTag={(name) =>
+                    setSelectedTag((prev) =>
+                      prev.toLowerCase() === name.toLowerCase() ? "" : name
+                    )
+                  }
+                />
+              )}
 
-              <div className="toolbar">
-                <div className="toolbar-left">
-                  <GlassSegmented
-                    ariaLabel="Archive status filter"
-                    value={archivedFilter}
-                    onChange={setArchivedFilter}
-                    options={[
-                      { value: "all", label: "All" },
-                      { value: "false", label: "Active" },
-                      { value: "true", label: "Archived" },
-                    ]}
-                  />
-
-                  <div className="active-filters">
-                    {selectedList && (
-                      <button
-                        type="button"
-                        className="filter-chip"
-                        onClick={() => setSelectedList("")}
-                      >
-                        <span>List: {selectedList}</span>
-                        <X size={13} aria-hidden="true" />
-                      </button>
-                    )}
-                    {selectedTag && (
-                      <button
-                        type="button"
-                        className="filter-chip"
-                        onClick={() => setSelectedTag("")}
-                      >
-                        <span>#{selectedTag}</span>
-                        <X size={13} aria-hidden="true" />
-                      </button>
-                    )}
-                    {debouncedQuery && (
-                      <button
-                        type="button"
-                        className="filter-chip"
-                        onClick={() => {
-                          setSearchInput("");
-                          setDebouncedQuery("");
-                        }}
-                      >
-                        <span>“{debouncedQuery}”</span>
-                        <X size={13} aria-hidden="true" />
-                      </button>
-                    )}
-                    {hasActiveFilters && (
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-compact"
-                        onClick={clearFilters}
-                      >
-                        <RotateCcw size={13} aria-hidden="true" />
-                        Reset
-                      </button>
-                    )}
-                  </div>
+              {hasActiveFilters && (
+                <div className="active-filters-bar" aria-label="Active filters">
+                  {librarySection !== "all" && (
+                    <button
+                      type="button"
+                      className="filter-chip"
+                      onClick={() => handleSelectLibrarySection("all")}
+                    >
+                      <span>Section: {librarySection}</span>
+                      <X size={12} aria-hidden="true" />
+                    </button>
+                  )}
+                  {smartFilters.map((sf) => (
+                    <button
+                      key={sf}
+                      type="button"
+                      className="filter-chip"
+                      onClick={() => handleToggleSmartFilter(sf)}
+                    >
+                      <span>{sf.replace("_", " ")}</span>
+                      <X size={12} aria-hidden="true" />
+                    </button>
+                  ))}
+                  {selectedList && (
+                    <button
+                      type="button"
+                      className="filter-chip"
+                      onClick={() => setSelectedList("")}
+                    >
+                      <span>List: {selectedList}</span>
+                      <X size={12} aria-hidden="true" />
+                    </button>
+                  )}
+                  {selectedTag && (
+                    <button
+                      type="button"
+                      className="filter-chip"
+                      onClick={() => setSelectedTag("")}
+                    >
+                      <span>#{selectedTag}</span>
+                      <X size={12} aria-hidden="true" />
+                    </button>
+                  )}
+                  {debouncedQuery && (
+                    <button
+                      type="button"
+                      className="filter-chip"
+                      onClick={() => {
+                        setSearchInput("");
+                        setDebouncedQuery("");
+                      }}
+                    >
+                      <span>“{debouncedQuery}”</span>
+                      <X size={12} aria-hidden="true" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-compact"
+                    onClick={clearFilters}
+                  >
+                    <RotateCcw size={13} aria-hidden="true" />
+                    Reset
+                  </button>
                 </div>
-
-                <div className="toolbar-right">
-                  <span className="result-count tabular-nums">
-                    {totalBookmarks} {totalBookmarks === 1 ? "result" : "results"}
-                  </span>
-
-                  <GlassSegmented
-                    ariaLabel="Bookmark layout mode"
-                    size="sm"
-                    value={viewMode}
-                    onChange={setViewMode}
-                    options={[
-                      {
-                        value: "grid",
-                        label: <LayoutGrid size={15} aria-hidden="true" />,
-                        ariaLabel: "Grid view",
-                      },
-                      {
-                        value: "list",
-                        label: <ListIcon size={15} aria-hidden="true" />,
-                        ariaLabel: "List view",
-                      },
-                    ]}
-                  />
-                </div>
-              </div>
+              )}
 
               <BookmarkList
-                items={bookmarks}
+                items={visibleBookmarks}
+                totalAvailable={totalBookmarks}
                 loading={loadingBookmarks}
                 viewMode={viewMode}
+                density={density}
+                selectedId={selectedBookmark?.id ?? null}
                 hasActiveFilters={hasActiveFilters}
-                onOpenDetail={(b) => {
-                  setDrawerInstant(false);
+                hasMore={bookmarks.length < totalBookmarks}
+                loadingMore={loadingMore}
+                onSelectBookmark={(b) => {
                   setSelectedBookmark(b);
+                  if (!isMobileInspector && !fullBleed) {
+                    setInspectorOpen(true);
+                  }
                 }}
                 onToggleArchive={handleToggleArchive}
                 onSelectTag={(name) => setSelectedTag(name)}
@@ -477,6 +656,7 @@ export function App() {
                 }}
                 onOpenImport={() => setActiveView("import")}
                 onClearFilters={clearFilters}
+                onLoadMore={handleLoadMore}
               />
             </>
           )}
@@ -516,31 +696,49 @@ export function App() {
         </main>
       </div>
 
-      <AddBookmarkModal
-        open={addModalOpen}
-        instantOpen={addModalInstant}
-        lists={lists}
-        onClose={() => setAddModalOpen(false)}
-        onCreated={async () => {
-          await Promise.all([refreshMetadata(), refreshBookmarks()]);
-        }}
-        onNotify={notify}
-      />
-
-      <BookmarkDrawer
+      <BookmarkInspector
         bookmark={selectedBookmark}
-        instantOpen={drawerInstant}
+        open={effectiveInspectorOpen}
+        isMobileViewport={isMobileInspector}
         allLists={lists}
-        onClose={() => setSelectedBookmark(null)}
+        stats={stats}
+        withThumbnailCount={libraryCounts.withThumb}
+        onClose={() => {
+          if (isMobileInspector) {
+            setSelectedBookmark(null);
+          } else if (selectedBookmark) {
+            setSelectedBookmark(null);
+          } else {
+            setInspectorOpen(false);
+          }
+        }}
+        onSelectBookmark={(b) => setSelectedBookmark(b)}
+        onSelectTagFilter={(name) => {
+          setSelectedTag(name);
+          setActiveView("bookmarks");
+        }}
         onUpdated={async (updated) => {
           setSelectedBookmark(updated);
           setBookmarks((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
           await refreshMetadata();
         }}
         onDeleted={async (id) => {
+          setSelectedBookmark(null);
           setBookmarks((prev) => prev.filter((b) => b.id !== id));
           setTotalBookmarks((n) => Math.max(0, n - 1));
           await refreshMetadata();
+        }}
+        onNotify={notify}
+      />
+
+      <AddBookmarkModal
+        open={addModalOpen}
+        instantOpen={addModalInstant}
+        lists={lists}
+        onClose={() => setAddModalOpen(false)}
+        onCreated={async (created) => {
+          setSelectedBookmark(created);
+          await Promise.all([refreshMetadata(), refreshBookmarks()]);
         }}
         onNotify={notify}
       />
