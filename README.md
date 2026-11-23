@@ -84,3 +84,55 @@ curl -X POST http://127.0.0.1:8787/api/bookmarks \
     "source": "harvester"
   }'
 ```
+
+## MCP Server (`social-vault-mcp`)
+
+`social-vault-mcp` exposes Social Vault over the Model Context Protocol (`stdio` JSON-RPC) using the official Go SDK (`github.com/modelcontextprotocol/go-sdk`). It talks strictly to the vault's HTTP REST API — it never reads the local SQLite database and does not require `VAULT_PASSWORD`.
+
+### Build
+
+```bash
+# macOS / local
+go build -o social-vault-mcp ./cmd/social-vault-mcp
+
+# Linux amd64 (for VPS)
+GOOS=linux GOARCH=amd64 go build -o social-vault-mcp-linux ./cmd/social-vault-mcp
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `VAULT_API_KEY` | _(required)_ | API key sent via `Authorization: Bearer` (server exits on startup if missing) |
+| `VAULT_URL` | `https://vault.adityahimaone.space` | Base URL of the Social Vault HTTP API |
+
+### Tools
+
+- `search_bookmarks` — full-text search with `query`, `limit`, and optional `archived`, `tag`, `list` filters.
+- `add_bookmark` — save an `http`/`https` `url` with optional `title`, `notes`, and `tags[]`.
+- `list_bookmarks` — paginated bookmark listing (`limit`, `offset`, `archived`).
+- `get_bookmark` — fetch full details for a bookmark by `id`.
+- `update_bookmark` — update `title`, `notes`, `tags[]`, or `archived` status by `id`.
+- `list_tags` — list all tags with bookmark counts.
+- `list_lists` — list all collections with bookmark counts.
+- `get_stats` — fetch total, active, archived, tag/list counts, and top tags.
+
+### Example Client Configuration (`agy` / `dsh` / Claude)
+
+```json
+{
+  "mcpServers": {
+    "social-vault": {
+      "command": "/path/to/social-vault-mcp",
+      "env": {
+        "VAULT_URL": "https://vault.adityahimaone.space",
+        "VAULT_API_KEY": "<your-vault-api-key>"
+      }
+    }
+  }
+}
+```
+
+## Browser Extension
+
+A zero-build Manifest V3 extension for Brave and Chrome lives in [`extension/`](extension/README.md) with a one-click save popup, page/link context menus, badge status feedback, and `chrome.storage.local` settings.

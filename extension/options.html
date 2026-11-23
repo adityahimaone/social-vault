@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Social Vault Extension Settings</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="options-page">
+    <main class="options-shell">
+      <header class="top-bar options-header">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 3a2 2 0 0 0-2 2v16l8-4 8 4V5a2 2 0 0 0-2-2H6z" />
+            </svg>
+          </div>
+          <div>
+            <h1 class="brand-title">Social Vault Settings</h1>
+            <p class="brand-subtitle">Configure your vault URL and API key for one-click saving</p>
+          </div>
+        </div>
+      </header>
+
+      <section class="card">
+        <form id="options-form" class="form-stack options-form" novalidate>
+          <div class="field">
+            <div class="field-label-row">
+              <label class="field-label" for="vault-url">Vault URL</label>
+              <button type="button" id="reset-url-btn" class="btn btn-ghost btn-sm">Use default</button>
+            </div>
+            <input
+              id="vault-url"
+              name="vaultUrl"
+              type="url"
+              class="input input-mono"
+              placeholder="https://vault.adityahimaone.space"
+              autocomplete="url"
+              spellcheck="false"
+              required
+            />
+            <p class="field-hint">Base address of your Social Vault instance (without trailing slash).</p>
+            <p id="vault-url-error" class="field-error hidden" role="alert"></p>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="api-key">API Key</label>
+            <div class="input-group">
+              <input
+                id="api-key"
+                name="apiKey"
+                type="password"
+                class="input input-mono"
+                placeholder="Paste your VAULT_API_KEY"
+                autocomplete="off"
+                spellcheck="false"
+                required
+              />
+              <button
+                type="button"
+                id="toggle-key-btn"
+                class="btn btn-secondary"
+                aria-pressed="false"
+                aria-label="Show API key"
+              >
+                Show
+              </button>
+            </div>
+            <p class="field-hint">Sent only in the Authorization Bearer header to your configured Vault URL.</p>
+            <p id="api-key-error" class="field-error hidden" role="alert"></p>
+          </div>
+
+          <div id="options-status" class="banner hidden" role="status" aria-live="polite"></div>
+
+          <div class="actions-row">
+            <button type="submit" id="save-settings-btn" class="btn btn-primary">
+              <span id="save-settings-spinner" class="spinner hidden" aria-hidden="true"></span>
+              <span id="save-settings-label">Save Settings</span>
+            </button>
+            <button type="button" id="test-connection-btn" class="btn btn-secondary">
+              <span id="test-spinner" class="spinner hidden" aria-hidden="true"></span>
+              <span id="test-label">Test Connection</span>
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <aside class="privacy-box">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        </svg>
+        <div>
+          <strong>Local-only storage:</strong> Your Vault URL and API key are saved in
+          <code>chrome.storage.local</code> on this browser profile only. They are never synced to cloud
+          storage and never transmitted anywhere except the Vault URL above.
+        </div>
+      </aside>
+    </main>
+
+    <script src="vault-api.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

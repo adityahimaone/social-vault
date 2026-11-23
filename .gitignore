@@ -1,5 +1,7 @@
-social-vault
-social-vault-linux
+/social-vault
+/social-vault-linux
+/social-vault-mcp
+/social-vault-mcp-linux
 .env
 .env.*
 !.env.sample
