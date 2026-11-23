@@ -1,0 +1,41 @@
+<div class="x78zum5 xdt5mv6 x1n2onr6">
+  <!-- Standard relative /@user/post/<id> link with query string -->
+  <div class="x1lliihq x6ikm8r">
+    <a class="x1i10hfl xjbqb8w" href="/@aditya.dev/post/DD12345abc_?xmt=AQF0xyz">
+      <time datetime="2026-10-10T10:00:00Z">2h</time>
+    </a>
+    <a class="x1i10hfl" href="/@aditya.dev">aditya.dev</a>
+    <a class="x1i10hfl" href="https://example.com/external-article">Read more</a>
+  </div>
+
+  <!-- Duplicate via /t/<id> and /media (should stay deduplicated as /@aditya.dev/post/DD12345abc_) -->
+  <div class="x1lliihq">
+    <a class="x9f619" href="/t/DD12345abc_">Thread link</a>
+    <a class="x9f619" href="https://threads.com/@aditya.dev/post/DD12345abc_/media">Media</a>
+  </div>
+
+  <!-- Standalone /t/<id> that later appears with /@user/post/<id> (should upgrade) -->
+  <div class="x1lliihq">
+    <a class="x1i10hfl" href="/t/EE98765xyz">View thread</a>
+    <a class="x1i10hfl" href="https://www.threads.com/@zuck/post/EE98765xyz">Timestamp</a>
+  </div>
+
+  <!-- Standalone /post/<id> -->
+  <div class="x1lliihq">
+    <a class="xabc123" href="/post/FF55555mno/">Open post</a>
+  </div>
+
+  <!-- Bare threads.net host variant -->
+  <div class="x1lliihq">
+    <a class="xabc999" href="https://threads.net/@mosseri/post/GG11111pqr">Legacy host</a>
+  </div>
+
+  <!-- Unavailable / disabled links (must be skipped) -->
+  <div data-unavailable="true">
+    <a href="/@removed/post/ZZ00000gone">Unavailable post</a>
+  </div>
+  <div>
+    <a aria-disabled="true" href="/@disabled/post/ZZ00000dis">Disabled link</a>
+    <a href="javascript:void(0)">Ignore JS</a>
+  </div>
+</div>

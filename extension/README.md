@@ -23,6 +23,30 @@ Your Vault URL and API key are stored exclusively in `chrome.storage.local` on t
 - **Toolbar Popup**: Auto-fills the current tab's URL and title, lets you add comma-separated tags (with live chip preview) and optional notes, and submits with `Save to Vault` or `⌘/Ctrl + Enter`.
 - **Context Menu**: Right-click any page (**Save page to Social Vault**) or hyperlink (**Save link to Social Vault**) to save immediately in the background.
 - **Badge Feedback**: Briefly displays `✓` (saved), `•` (already saved), or `!` (error) on the extension icon after saving.
+- **Bulk Fetch (X & Threads)**: Injects a compact bottom-right floating panel on supported X and Threads collection pages so you can collect and save visible (and auto-scrolled) posts in one session.
+
+## Bulk Fetch (X & Threads)
+
+### Supported Pages
+- **X / Twitter**: `https://x.com/i/bookmarks`, `https://x.com/<username>/likes` (and matching `twitter.com` URLs).
+- **Threads**: `https://www.threads.com/saved`, `https://www.threads.com/liked` (plus `threads.net` and `/@<username>/(saved|liked|likes)` variants if routed there).
+- On any other X or Threads page, no panel is rendered.
+
+### How It Works
+1. Navigate to one of the supported pages above while signed in to X or Threads.
+2. The **Social Vault** floating panel appears in the bottom-right corner with a live count of detected posts.
+3. Keep **Auto-scroll to load more** enabled (default **ON**) to automatically scroll down and collect posts before saving, or turn it **OFF** to save only what is currently loaded.
+4. Click **Save all to Vault** to start. Nothing is auto-saved before you click this button.
+5. You can click **Stop** at any time during scrolling or saving.
+6. The extension saves each deduplicated post URL sequentially via `POST {VAULT_URL}/api/bookmarks` (with a ~150 ms pause between requests, empty title/notes so your Social Vault server fetches metadata) and shows live counts for **Saved**, **Skipped** (duplicates / HTTP 409), and **Failed**.
+
+### Limits & Known Risks
+- **Session cap**: Up to **200 posts per bulk session** (`MAX_POSTS_PER_SESSION = 200`).
+- **Threads DOM & route fragility**: Threads uses obfuscated CSS class names and serves `/saved` and `/liked` behind authenticated views (with `threads.net` redirecting to `threads.com`). The extractor avoids class-name selectors and tries multiple post link patterns (`/@user/post/<id>`, `/user/post/<id>`, `/t/<id>`, `/post/<id>`), but Meta may change URL structures or route paths without notice.
+- **X virtualized feed & markup changes**: X unmounts older `<article>` nodes as you scroll and may change `data-testid` or permalink markup. The collector merges URLs incrementally during scroll and skips deleted/unavailable tombstones heuristically.
+- **Metadata fetching on auth-walled posts**: Because `title` and `notes` are left empty for the server to crawl, posts that require login or block server-side metadata scraping may be saved with fallback URL titles.
+- **Custom Vault URLs**: If you use a local or custom Vault URL (not the default `https://vault.adityahimaone.space`), configure it and grant site permission in **Options** first.
+- **Live browser verification**: Automated checks verify extraction on HTML fixtures, JS syntax, and local API saving; live testing in Brave against real authenticated X and Threads sessions is performed separately.
 
 ## Known Limitations
 

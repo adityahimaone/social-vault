@@ -1,0 +1,78 @@
+<main>
+  <div aria-label="Timeline: Bookmarks">
+    <!-- Normal tweet with time permalink and media + query params -->
+    <article data-testid="tweet">
+      <div>
+        <a href="/alice_dev/status/1850000000000000001?s=20">
+          <time datetime="2026-10-01T10:00:00.000Z">Oct 1</time>
+        </a>
+        <div data-testid="tweetText">First valid bookmark with query string</div>
+        <a href="/alice_dev/status/1850000000000000001/photo/1">Photo</a>
+        <a href="/alice_dev/status/1850000000000000001/analytics">Analytics</a>
+      </div>
+    </article>
+
+    <!-- Duplicate via twitter.com host -->
+    <article data-testid="tweet">
+      <div>
+        <a href="https://twitter.com/alice_dev/status/1850000000000000001">
+          <time datetime="2026-10-01T10:00:00.000Z">Oct 1</time>
+        </a>
+        <div data-testid="tweetText">Duplicate on twitter.com</div>
+      </div>
+    </article>
+
+    <!-- Tweet quoting another tweet (only outer status should be extracted) -->
+    <article data-testid="tweet">
+      <div>
+        <a href="/bob_ai/status/1850000000000000002">
+          <time datetime="2026-10-02T12:00:00.000Z">Oct 2</time>
+        </a>
+        <div data-testid="tweetText">Great thread here</div>
+        <div role="blockquote">
+          <a href="/quoted_user/status/1849999999999999999">
+            <time datetime="2026-09-30T09:00:00.000Z">Sep 30</time>
+          </a>
+          <div data-testid="tweetText">Quoted tweet text</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Tweet quoting a deleted tweet (outer tweet is valid and must be kept) -->
+    <article data-testid="tweet">
+      <div>
+        <a href="/carol_go/status/1850000000000000003">
+          <time datetime="2026-10-03T08:00:00.000Z">Oct 3</time>
+        </a>
+        <div data-testid="tweetText">Commenting on a deleted quote</div>
+        <div role="blockquote">
+          <div data-testid="tweet-tombstone">This Post was deleted by the Post author.</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Deleted tombstone article (must be skipped) -->
+    <article data-testid="tweet-tombstone">
+      <div>
+        <span>This Post was deleted by the Post author.</span>
+        <a href="/deleted_user/status/1850000000000000999">Learn more</a>
+      </div>
+    </article>
+
+    <!-- Unavailable article text without tweetText (must be skipped) -->
+    <article data-testid="tweet">
+      <div>
+        <span>This post is unavailable.</span>
+        <a href="/suspended_user/status/1850000000000000888">View</a>
+      </div>
+    </article>
+
+    <!-- Fallback i/web permalink without time tag -->
+    <article data-testid="tweet">
+      <div>
+        <a href="/i/web/status/1850000000000000004/photo/1">Media</a>
+        <div data-testid="tweetText">Media fallback tweet</div>
+      </div>
+    </article>
+  </div>
+</main>

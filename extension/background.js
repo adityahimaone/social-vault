@@ -113,10 +113,71 @@ importScripts("vault-api.js");
     });
   });
 
-  chrome.runtime.onMessage.addListener(function (message) {
-    if (!message || message.type !== "FLASH_BADGE") {
+  chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (!message || !message.type) {
       return;
     }
-    flashBadge(message.kind || "success", message.title);
+
+    if (message.type === "FLASH_BADGE") {
+      flashBadge(message.kind || "success", message.title);
+      return;
+    }
+
+    if (!sender || sender.id !== chrome.runtime.id) {
+      return;
+    }
+
+    if (message.type === "BULK_GET_CONFIG") {
+      globalThis.SocialVaultAPI.getSettings()
+        .then(function (settings) {
+          return globalThis.SocialVaultAPI.hasOriginPermission(settings.originPattern).then(function (granted) {
+            var vaultHost = settings.vaultUrl;
+            try {
+              vaultHost = new URL(settings.vaultUrl).host;
+            } catch (_err) {}
+
+            sendResponse({
+              ok: true,
+              hasApiKey: Boolean(settings.apiKey),
+              hasPermission: Boolean(granted),
+              vaultUrl: settings.vaultUrl,
+              vaultHost: vaultHost
+            });
+          });
+        })
+        .catch(function (err) {
+          sendResponse({
+            ok: false,
+            error: (err && err.message) || "Could not read extension settings."
+          });
+        });
+      return true;
+    }
+
+    if (message.type === "BULK_SAVE_BOOKMARK") {
+      globalThis.SocialVaultAPI.saveBookmark({
+        url: message.url,
+        source: message.source || "extension-bulk"
+      })
+        .then(function (result) {
+          sendResponse(result);
+        })
+        .catch(function (err) {
+          sendResponse({
+            ok: false,
+            code: "NETWORK_ERROR",
+            error: (err && err.message) || "Failed to save bookmark."
+          });
+        });
+      return true;
+    }
+
+    if (message.type === "OPEN_OPTIONS") {
+      if (chrome.runtime && chrome.runtime.openOptionsPage) {
+        chrome.runtime.openOptionsPage();
+      }
+      sendResponse({ ok: true });
+      return;
+    }
   });
 })();
