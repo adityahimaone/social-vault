@@ -47,6 +47,10 @@ The API key is the vault's single master key: anyone holding it can read
 and write every bookmark. Keep it in the client's config file (0600) and
 never commit it.
 
+API-key requests also bypass the `nsfw` tag privacy lock (`NSFW_TAG_PASSWORD`),
+which only gates browser cookie sessions — so `social-vault-mcp` always sees
+and can manage `nsfw`-tagged bookmarks and tags regardless of browser lock state.
+
 ## Tools
 
 | Tool | Description | Key inputs |

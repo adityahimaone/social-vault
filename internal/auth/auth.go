@@ -25,6 +25,9 @@ type Authenticator struct {
 	passwordConfigured bool
 	apiKeyHash         [32]byte
 	apiKeyConfigured   bool
+	nsfwHash           [32]byte
+	nsfwToken          string
+	nsfwConfigured     bool
 }
 
 func New(store *db.Store, password, apiKey string) *Authenticator {

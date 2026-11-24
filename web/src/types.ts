@@ -86,6 +86,11 @@ export interface TaggingStatus {
   untagged_count: number;
 }
 
+export interface NsfwStatus {
+  configured: boolean;
+  locked: boolean;
+}
+
 export type ActiveView = "bookmarks" | "tags" | "lists" | "import";
 export type ArchivedFilter = "all" | "false" | "true";
 export type LibrarySection = "all" | "favorites" | "untagged" | "recent" | "archived";

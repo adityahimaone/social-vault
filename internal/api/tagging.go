@@ -17,7 +17,7 @@ func (s *Server) handleListTagReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, err := s.store.ListPendingTagReviews(r.Context(), limit)
+	items, err := s.store.ListPendingTagReviewsFiltered(r.Context(), limit, !s.auth.IsNsfwUnlocked(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list tag review queue")
 		return

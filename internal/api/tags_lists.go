@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	stats, err := s.store.GetStats(r.Context())
+	stats, err := s.store.GetStatsFiltered(r.Context(), !s.auth.IsNsfwUnlocked(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load stats")
 		return
@@ -17,7 +17,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
-	tags, err := s.store.ListTags(r.Context())
+	tags, err := s.store.ListTagsFiltered(r.Context(), !s.auth.IsNsfwUnlocked(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list tags")
 		return
@@ -31,6 +31,10 @@ func (s *Server) handleCreateTag(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.auth.IsNsfwUnlocked(r) && isNsfwTagName(body.Name) {
+		writeError(w, http.StatusBadRequest, "nsfw tag is locked; unlock before creating it")
 		return
 	}
 	tag, err := s.store.CreateTag(r.Context(), body.Name)
@@ -51,7 +55,7 @@ func (s *Server) handleDeleteTag(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid tag id")
 		return
 	}
-	if err := s.store.DeleteTag(r.Context(), id); err != nil {
+	if err := s.store.DeleteTagFiltered(r.Context(), id, !s.auth.IsNsfwUnlocked(r)); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "tag not found")
 			return

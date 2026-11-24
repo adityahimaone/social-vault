@@ -130,6 +130,7 @@ export function App() {
   const [archivedFilter, setArchivedFilter] = useState<ArchivedFilter>("all");
   const [selectedTag, setSelectedTag] = useState("");
   const [selectedList, setSelectedList] = useState("");
+  const [nsfwLockedOverride, setNsfwLockedOverride] = useState<boolean | null>(null);
 
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [totalBookmarks, setTotalBookmarks] = useState(0);
@@ -426,11 +427,27 @@ export function App() {
     );
   }
 
+  const handleNsfwStatusChange = useCallback((st: { configured: boolean; locked: boolean }) => {
+    const locked = st.configured && st.locked;
+    setNsfwLockedOverride(locked);
+    if (locked) {
+      setSelectedTag((prev) => (prev.toLowerCase() === "nsfw" ? "" : prev));
+      setSelectedBookmark((prev) =>
+        prev?.tags.some((t) => t.name.toLowerCase() === "nsfw") ? null : prev
+      );
+      setQuickLookBookmark((prev) =>
+        prev?.tags.some((t) => t.name.toLowerCase() === "nsfw") ? null : prev
+      );
+    }
+  }, []);
+
   async function handleLogout() {
     await api.logout();
     setAuthState((prev) => ({ ...prev, authenticated: false }));
     setSelectedBookmark(null);
     setQuickLookBookmark(null);
+    setNsfwLockedOverride(null);
+    setSelectedTag((prev) => (prev.toLowerCase() === "nsfw" ? "" : prev));
   }
 
   const applyArchiveState = useCallback(
@@ -572,6 +589,7 @@ export function App() {
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
         onLogout={handleLogout}
+        nsfwLockedOverride={nsfwLockedOverride}
       />
 
       <div className="main-area">
@@ -762,12 +780,15 @@ export function App() {
           {activeView === "tags" && (
             <TagsView
               tags={tags}
-              onRefresh={refreshMetadata}
+              onRefresh={async () => {
+                await Promise.all([refreshMetadata(), refreshBookmarks()]);
+              }}
               onFilterByTag={(name) => {
                 setSelectedTag(name);
                 setActiveView("bookmarks");
               }}
               onNotify={notify}
+              onNsfwStatusChange={handleNsfwStatusChange}
             />
           )}
 

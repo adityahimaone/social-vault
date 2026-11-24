@@ -2227,6 +2227,12 @@ button {
   color: var(--fg-muted);
 }
 
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .panel-count-pill {
   padding: 3px 11px;
   border-radius: var(--radius-pill);
@@ -2277,6 +2283,12 @@ button {
   font-size: 14.5px;
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+.nsfw-lock-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .autotag-subtitle {

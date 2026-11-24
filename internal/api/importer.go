@@ -63,11 +63,17 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	nsfwUnlocked := s.auth.IsNsfwUnlocked(r)
+
 	var imported, skipped, errCount int
 	for _, entry := range entries {
 		cleanURL, verr := validateHTTPURL(entry.URL)
 		if verr != nil {
 			errCount++
+			continue
+		}
+		if !nsfwUnlocked && hasNsfwTagName(entry.Tags) {
+			skipped++
 			continue
 		}
 		entry.URL = cleanURL

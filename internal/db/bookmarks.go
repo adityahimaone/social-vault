@@ -76,12 +76,13 @@ type UpdateBookmarkInput struct {
 }
 
 type BookmarkFilter struct {
-	Query    string
-	Archived string // "all", "true", "false"
-	Tag      string
-	List     string
-	Limit    int
-	Offset   int
+	Query       string
+	Archived    string // "all", "true", "false"
+	Tag         string
+	List        string
+	Limit       int
+	Offset      int
+	ExcludeNsfw bool
 }
 
 func (s *Store) CreateBookmark(ctx context.Context, in CreateBookmarkInput) (*Bookmark, error) {
@@ -248,6 +249,14 @@ func (s *Store) ListBookmarks(ctx context.Context, f BookmarkFilter) ([]Bookmark
 		}
 	}
 
+	if f.ExcludeNsfw {
+		where = append(where, `NOT EXISTS (
+			SELECT 1 FROM bookmark_tags bt_nsfw
+			JOIN tags t_nsfw ON t_nsfw.id = bt_nsfw.tag_id
+			WHERE bt_nsfw.bookmark_id = b.id AND lower(t_nsfw.name) = 'nsfw'
+		)`)
+	}
+
 	joinClause := strings.Join(joins, " ")
 	whereClause := ""
 	if len(where) > 0 {
@@ -388,6 +397,13 @@ func (s *Store) DeleteBookmark(ctx context.Context, id int64) error {
 }
 
 func (s *Store) GetStats(ctx context.Context) (*Stats, error) {
+	return s.GetStatsFiltered(ctx, false)
+}
+
+// GetStatsFiltered returns vault summary counts.
+// When excludeNsfw is true, top_tags omits the "nsfw" tag while Total, Active,
+// Archived, TagsCount, and ListsCount intentionally remain unmodified.
+func (s *Store) GetStatsFiltered(ctx context.Context, excludeNsfw bool) (*Stats, error) {
 	st := &Stats{TopTags: make([]Tag, 0)}
 
 	err := s.db.QueryRowContext(ctx, `
@@ -408,14 +424,21 @@ func (s *Store) GetStats(ctx context.Context) (*Stats, error) {
 		return nil, fmt.Errorf("lists count: %w", err)
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
+	topTagsWhere := ""
+	if excludeNsfw {
+		topTagsWhere = `WHERE lower(t.name) != 'nsfw'`
+	}
+	topTagsQuery := fmt.Sprintf(`
 		SELECT t.id, t.name, COUNT(bt.bookmark_id) AS cnt, t.created_at
 		FROM tags t
 		JOIN bookmark_tags bt ON bt.tag_id = t.id
+		%s
 		GROUP BY t.id
 		ORDER BY cnt DESC, t.name COLLATE NOCASE ASC
 		LIMIT 5
-	`)
+	`, topTagsWhere)
+
+	rows, err := s.db.QueryContext(ctx, topTagsQuery)
 	if err != nil {
 		return nil, fmt.Errorf("top tags: %w", err)
 	}

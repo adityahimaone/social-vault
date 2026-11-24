@@ -9,13 +9,24 @@ import (
 )
 
 func (s *Store) ListTags(ctx context.Context) ([]Tag, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	return s.ListTagsFiltered(ctx, false)
+}
+
+func (s *Store) ListTagsFiltered(ctx context.Context, excludeNsfw bool) ([]Tag, error) {
+	where := ""
+	if excludeNsfw {
+		where = `WHERE lower(t.name) != 'nsfw'`
+	}
+	query := fmt.Sprintf(`
 		SELECT t.id, t.name, COUNT(bt.bookmark_id) AS cnt, t.created_at
 		FROM tags t
 		LEFT JOIN bookmark_tags bt ON bt.tag_id = t.id
+		%s
 		GROUP BY t.id
 		ORDER BY cnt DESC, t.name COLLATE NOCASE ASC
-	`)
+	`, where)
+
+	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list tags: %w", err)
 	}
@@ -61,7 +72,15 @@ func (s *Store) CreateTag(ctx context.Context, rawName string) (*Tag, error) {
 }
 
 func (s *Store) DeleteTag(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM tags WHERE id = ?`, id)
+	return s.DeleteTagFiltered(ctx, id, false)
+}
+
+func (s *Store) DeleteTagFiltered(ctx context.Context, id int64, excludeNsfw bool) error {
+	query := `DELETE FROM tags WHERE id = ?`
+	if excludeNsfw {
+		query = `DELETE FROM tags WHERE id = ? AND lower(name) != 'nsfw'`
+	}
+	res, err := s.db.ExecContext(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("delete tag: %w", err)
 	}

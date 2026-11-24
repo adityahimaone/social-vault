@@ -127,6 +127,12 @@ func (s *Store) GetTagReview(ctx context.Context, id int64) (*TagReviewItem, err
 
 // ListPendingTagReviews lists pending review queue rows newest-first with bookmark title and URL.
 func (s *Store) ListPendingTagReviews(ctx context.Context, limit int) ([]TagReviewItem, error) {
+	return s.ListPendingTagReviewsFiltered(ctx, limit, false)
+}
+
+// ListPendingTagReviewsFiltered lists pending review queue rows newest-first,
+// optionally excluding rows whose bookmark carries the "nsfw" tag.
+func (s *Store) ListPendingTagReviewsFiltered(ctx context.Context, limit int, excludeNsfw bool) ([]TagReviewItem, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -134,14 +140,26 @@ func (s *Store) ListPendingTagReviews(ctx context.Context, limit int) ([]TagRevi
 		limit = 200
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
+	extraWhere := ""
+	if excludeNsfw {
+		extraWhere = `AND NOT EXISTS (
+			SELECT 1 FROM bookmark_tags bt_nsfw
+			JOIN tags t_nsfw ON t_nsfw.id = bt_nsfw.tag_id
+			WHERE bt_nsfw.bookmark_id = q.bookmark_id AND lower(t_nsfw.name) = 'nsfw'
+		)`
+	}
+
+	query := fmt.Sprintf(`
 		SELECT q.id, q.bookmark_id, b.title, b.url, q.suggested_tags, q.jev_scores, q.source, q.status, q.created_at, q.resolved_at
 		FROM tag_review_queue q
 		JOIN bookmarks b ON b.id = q.bookmark_id
 		WHERE q.status = 'pending'
+		%s
 		ORDER BY q.created_at DESC, q.id DESC
 		LIMIT ?
-	`, limit)
+	`, extraWhere)
+
+	rows, err := s.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list pending tag reviews: %w", err)
 	}

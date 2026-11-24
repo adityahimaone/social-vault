@@ -29,6 +29,7 @@ func main() {
 	password := os.Getenv("VAULT_PASSWORD")
 	apiKey := os.Getenv("VAULT_API_KEY")
 	jevAPIKey := strings.TrimSpace(os.Getenv("JEV_API_KEY"))
+	nsfwPassword := strings.TrimSpace(os.Getenv("NSFW_TAG_PASSWORD"))
 
 	store, err := db.Open(dataDir)
 	if err != nil {
@@ -47,7 +48,7 @@ func main() {
 		log.Fatalf("mount embedded frontend: %v", err)
 	}
 
-	authenticator := auth.New(store, password, apiKey)
+	authenticator := auth.New(store, password, apiKey).WithNsfwPassword(nsfwPassword)
 	fetcher := crawler.NewFetcher(nil)
 	jevClient := tagging.NewJevClient(jevAPIKey)
 	tagger := tagging.NewService(store, jevClient)
@@ -67,6 +68,9 @@ func main() {
 	}
 	if jevAPIKey == "" {
 		log.Printf("warning: JEV_API_KEY is empty; layer 2 Jev auto-tagging is disabled")
+	}
+	if nsfwPassword == "" {
+		log.Printf("warning: NSFW_TAG_PASSWORD is empty; nsfw tag stays hidden and cannot be unlocked")
 	}
 
 	go func() {

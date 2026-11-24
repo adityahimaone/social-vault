@@ -19,12 +19,13 @@ func (s *Server) handleListBookmarks(w http.ResponseWriter, r *http.Request) {
 	offset := parseIntDefault(q.Get("offset"), 0)
 
 	items, total, err := s.store.ListBookmarks(r.Context(), db.BookmarkFilter{
-		Query:    q.Get("q"),
-		Archived: q.Get("archived"),
-		Tag:      q.Get("tag"),
-		List:     q.Get("list"),
-		Limit:    limit,
-		Offset:   offset,
+		Query:       q.Get("q"),
+		Archived:    q.Get("archived"),
+		Tag:         q.Get("tag"),
+		List:        q.Get("list"),
+		Limit:       limit,
+		Offset:      offset,
+		ExcludeNsfw: !s.auth.IsNsfwUnlocked(r),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list bookmarks")
@@ -58,6 +59,12 @@ func (s *Server) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	nsfwUnlocked := s.auth.IsNsfwUnlocked(r)
+	if !nsfwUnlocked && hasNsfwTagName(body.Tags) {
+		writeError(w, http.StatusBadRequest, "nsfw tag is locked; unlock before assigning it")
+		return
+	}
+
 	cleanURL, err := validateHTTPURL(body.URL)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -65,6 +72,12 @@ func (s *Server) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if existing, err := s.store.GetBookmarkByURL(r.Context(), cleanURL); err == nil {
+		if !nsfwUnlocked && bookmarkHasNsfwTag(existing) {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": "bookmark already exists",
+			})
+			return
+		}
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error":    "bookmark already exists",
 			"bookmark": existing,
@@ -140,6 +153,12 @@ func (s *Server) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, db.ErrDuplicateURL) {
 			existing, _ := s.store.GetBookmarkByURL(r.Context(), cleanURL)
+			if !nsfwUnlocked && bookmarkHasNsfwTag(existing) {
+				writeJSON(w, http.StatusConflict, map[string]any{
+					"error": "bookmark already exists",
+				})
+				return
+			}
 			writeJSON(w, http.StatusConflict, map[string]any{
 				"error":    "bookmark already exists",
 				"bookmark": existing,
@@ -172,6 +191,10 @@ func (s *Server) handleGetBookmark(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load bookmark")
 		return
 	}
+	if !s.auth.IsNsfwUnlocked(r) && bookmarkHasNsfwTag(b) {
+		writeError(w, http.StatusNotFound, "bookmark not found")
+		return
+	}
 	writeJSON(w, http.StatusOK, b)
 }
 
@@ -194,6 +217,26 @@ func (s *Server) handleUpdateBookmark(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	if !s.auth.IsNsfwUnlocked(r) {
+		if body.Tags != nil && hasNsfwTagName(*body.Tags) {
+			writeError(w, http.StatusBadRequest, "nsfw tag is locked; unlock before assigning it")
+			return
+		}
+		existing, err := s.store.GetBookmark(r.Context(), id)
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "bookmark not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to update bookmark")
+			return
+		}
+		if bookmarkHasNsfwTag(existing) {
+			writeError(w, http.StatusNotFound, "bookmark not found")
+			return
+		}
 	}
 
 	updated, err := s.store.UpdateBookmark(r.Context(), id, db.UpdateBookmarkInput{
@@ -221,6 +264,21 @@ func (s *Server) handleDeleteBookmark(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid bookmark id")
 		return
+	}
+	if !s.auth.IsNsfwUnlocked(r) {
+		existing, err := s.store.GetBookmark(r.Context(), id)
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "bookmark not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to delete bookmark")
+			return
+		}
+		if bookmarkHasNsfwTag(existing) {
+			writeError(w, http.StatusNotFound, "bookmark not found")
+			return
+		}
 	}
 	if err := s.store.DeleteBookmark(r.Context(), id); err != nil {
 		if errors.Is(err, db.ErrNotFound) {

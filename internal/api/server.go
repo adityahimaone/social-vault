@@ -79,6 +79,10 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/tagging/backfill", protect(http.HandlerFunc(s.handleBackfillTagging)))
 	s.mux.Handle("GET /api/tagging/status", protect(http.HandlerFunc(s.handleTaggingStatus)))
 
+	s.mux.Handle("POST /api/nsfw/unlock", protect(http.HandlerFunc(s.handleNsfwUnlock)))
+	s.mux.Handle("POST /api/nsfw/lock", protect(http.HandlerFunc(s.handleNsfwLock)))
+	s.mux.Handle("GET /api/nsfw/status", protect(http.HandlerFunc(s.handleNsfwStatus)))
+
 	// Return 404 JSON for unmatched /api/* routes, SPA static assets otherwise
 	s.mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "endpoint not found")
@@ -122,6 +126,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	s.auth.ClearSession(r.Context(), w, r)
+	s.auth.ClearNsfwUnlocked(w, r)
 	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": false})
 }
 

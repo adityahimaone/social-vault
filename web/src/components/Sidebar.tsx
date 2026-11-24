@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import {
   Archive,
   Bookmark as BookmarkIcon,
@@ -8,6 +8,7 @@ import {
   FolderOpen,
   Hash,
   Image as ImageIcon,
+  Lock,
   LogOut,
   Moon,
   Search,
@@ -18,6 +19,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import { api, type NsfwStatus } from "../api";
 import type { ActiveView, LibrarySection, List, SmartFilter, Tag } from "../types";
 
 interface SidebarProps {
@@ -49,6 +51,7 @@ interface SidebarProps {
   theme: "dark" | "light";
   onToggleTheme: () => void;
   onLogout: () => void;
+  nsfwLockedOverride?: boolean | null;
 }
 
 const SMART_FILTER_ITEMS: { id: SmartFilter; label: string; icon: typeof CalendarClock }[] = [
@@ -81,7 +84,28 @@ export function Sidebar({
   theme,
   onToggleTheme,
   onLogout,
+  nsfwLockedOverride,
 }: SidebarProps) {
+  const [nsfwStatus, setNsfwStatus] = useState<NsfwStatus | null>(null);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    api
+      .nsfwStatus(ctrl.signal)
+      .then((st) => {
+        if (!ctrl.signal.aborted) setNsfwStatus(st);
+      })
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+      });
+    return () => ctrl.abort();
+  }, []);
+
+  const showHiddenTag =
+    nsfwLockedOverride != null
+      ? nsfwLockedOverride
+      : Boolean(nsfwStatus?.configured && nsfwStatus.locked);
+
   function navigate(view: ActiveView) {
     onSelectView(view);
     onClose();
@@ -326,29 +350,43 @@ export function Sidebar({
               Manage ({tags.length})
             </button>
           </div>
-          {tags.length > 0 ? (
-            tags.slice(0, 12).map((tag) => {
-              const active =
-                activeView === "bookmarks" && selectedTag.toLowerCase() === tag.name.toLowerCase();
-              return (
+          {tags.length > 0 || showHiddenTag ? (
+            <>
+              {tags.slice(0, 12).map((tag) => {
+                const active =
+                  activeView === "bookmarks" && selectedTag.toLowerCase() === tag.name.toLowerCase();
+                return (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    className="nav-item"
+                    aria-pressed={active}
+                    onClick={() => {
+                      onSelectTagFilter(active ? "" : tag.name);
+                      navigate("bookmarks");
+                    }}
+                  >
+                    <span className="nav-item-main">
+                      <Hash size={15} aria-hidden="true" />
+                      <span className="nav-item-label">{tag.name}</span>
+                    </span>
+                    <span className="nav-item-count tabular-nums">{tag.count ?? 0}</span>
+                  </button>
+                );
+              })}
+              {showHiddenTag && (
                 <button
-                  key={tag.id}
                   type="button"
                   className="nav-item"
-                  aria-pressed={active}
-                  onClick={() => {
-                    onSelectTagFilter(active ? "" : tag.name);
-                    navigate("bookmarks");
-                  }}
+                  onClick={() => navigate("tags")}
                 >
                   <span className="nav-item-main">
-                    <Hash size={15} aria-hidden="true" />
-                    <span className="nav-item-label">{tag.name}</span>
+                    <Lock size={15} aria-hidden="true" />
+                    <span className="nav-item-label">Hidden tag</span>
                   </span>
-                  <span className="nav-item-count tabular-nums">{tag.count ?? 0}</span>
                 </button>
-              );
-            })
+              )}
+            </>
           ) : (
             <button type="button" className="nav-item" onClick={() => navigate("tags")}>
               <span className="nav-item-main">

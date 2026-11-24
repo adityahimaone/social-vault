@@ -1,6 +1,15 @@
-import type { BackfillResult, Bookmark, ImportResult, List, Stats, Tag, TaggingStatus } from "./types";
+import type {
+  BackfillResult,
+  Bookmark,
+  ImportResult,
+  List,
+  NsfwStatus,
+  Stats,
+  Tag,
+  TaggingStatus,
+} from "./types";
 
-export type { BackfillResult, TaggingStatus } from "./types";
+export type { BackfillResult, NsfwStatus, TaggingStatus } from "./types";
 
 let onUnauthorizedHandler: (() => void) | null = null;
 
@@ -30,10 +39,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     credentials: "same-origin",
   });
 
-  if (res.status === 401 && path !== "/api/auth/login" && path !== "/api/auth/me") {
-    onUnauthorizedHandler?.();
-  }
-
   const text = await res.text();
   let parsed: unknown = null;
   if (text) {
@@ -44,11 +49,21 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
   }
 
+  const msg =
+    parsed && typeof parsed === "object" && "error" in parsed && typeof (parsed as { error?: unknown }).error === "string"
+      ? (parsed as { error: string }).error
+      : `Request failed (${res.status})`;
+
+  if (
+    res.status === 401 &&
+    path !== "/api/auth/login" &&
+    path !== "/api/auth/me" &&
+    !(path === "/api/nsfw/unlock" && msg !== "unauthorized")
+  ) {
+    onUnauthorizedHandler?.();
+  }
+
   if (!res.ok) {
-    const msg =
-      parsed && typeof parsed === "object" && "error" in parsed && typeof (parsed as { error?: unknown }).error === "string"
-        ? (parsed as { error: string }).error
-        : `Request failed (${res.status})`;
     throw new ApiError(res.status, msg, parsed);
   }
 
@@ -165,5 +180,19 @@ export const api = {
     request<BackfillResult>("/api/tagging/backfill", {
       method: "POST",
       body: JSON.stringify(layers && layers.length > 0 ? { layers } : {}),
+    }),
+
+  nsfwStatus: (signal?: AbortSignal) =>
+    request<NsfwStatus>("/api/nsfw/status", { signal }),
+
+  nsfwUnlock: (password: string) =>
+    request<{ unlocked: boolean }>("/api/nsfw/unlock", {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    }),
+
+  nsfwLock: () =>
+    request<{ locked: boolean }>("/api/nsfw/lock", {
+      method: "POST",
     }),
 };

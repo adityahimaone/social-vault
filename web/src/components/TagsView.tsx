@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Hash, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
-import { api, ApiError, type TaggingStatus } from "../api";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { Hash, Loader2, Lock, Plus, Sparkles, Trash2 } from "lucide-react";
+import { api, ApiError, type NsfwStatus, type TaggingStatus } from "../api";
 import type { Tag } from "../types";
 
 type LayerChoice = "rules" | "jev" | "both";
@@ -38,15 +38,39 @@ interface TagsViewProps {
   onRefresh: () => Promise<void>;
   onFilterByTag: (tagName: string) => void;
   onNotify: (msg: string, tone: "success" | "error" | "info") => void;
+  onNsfwStatusChange?: (status: NsfwStatus) => void;
 }
 
-export function TagsView({ tags, onRefresh, onFilterByTag, onNotify }: TagsViewProps) {
+export function TagsView({
+  tags,
+  onRefresh,
+  onFilterByTag,
+  onNotify,
+  onNsfwStatusChange,
+}: TagsViewProps) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [taggingStatus, setTaggingStatus] = useState<TaggingStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [layerChoice, setLayerChoice] = useState<LayerChoice>("both");
   const [backfilling, setBackfilling] = useState(false);
+  const [nsfwStatus, setNsfwStatus] = useState<NsfwStatus | null>(null);
+  const [nsfwPassword, setNsfwPassword] = useState("");
+  const [nsfwBusy, setNsfwBusy] = useState(false);
+  const nsfwInputRef = useRef<HTMLInputElement | null>(null);
+  const onNsfwStatusChangeRef = useRef(onNsfwStatusChange);
+  onNsfwStatusChangeRef.current = onNsfwStatusChange;
+
+  const refreshNsfwStatus = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const st = await api.nsfwStatus(signal);
+      if (signal?.aborted) return;
+      setNsfwStatus(st);
+      onNsfwStatusChangeRef.current?.(st);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+    }
+  }, []);
 
   const refreshTaggingStatus = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -65,8 +89,9 @@ export function TagsView({ tags, onRefresh, onFilterByTag, onNotify }: TagsViewP
   useEffect(() => {
     const ctrl = new AbortController();
     void refreshTaggingStatus(ctrl.signal);
+    void refreshNsfwStatus(ctrl.signal);
     return () => ctrl.abort();
-  }, [refreshTaggingStatus]);
+  }, [refreshTaggingStatus, refreshNsfwStatus]);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -124,6 +149,43 @@ export function TagsView({ tags, onRefresh, onFilterByTag, onNotify }: TagsViewP
     }
   }
 
+  const showNsfwUnlock = Boolean(nsfwStatus?.configured && nsfwStatus.locked);
+  const showNsfwLockButton = Boolean(nsfwStatus?.configured && !nsfwStatus.locked);
+
+  async function handleUnlockNsfw(e: FormEvent) {
+    e.preventDefault();
+    if (!nsfwPassword || nsfwBusy) return;
+    setNsfwBusy(true);
+    try {
+      await api.nsfwUnlock(nsfwPassword);
+      setNsfwPassword("");
+      await refreshNsfwStatus();
+      await onRefresh();
+      await refreshTaggingStatus();
+      onNotify("Hidden tag unlocked", "success");
+    } catch (err) {
+      onNotify(err instanceof ApiError ? err.message : "Password salah", "error");
+    } finally {
+      setNsfwBusy(false);
+    }
+  }
+
+  async function handleLockNsfw() {
+    if (nsfwBusy) return;
+    setNsfwBusy(true);
+    try {
+      await api.nsfwLock();
+      await refreshNsfwStatus();
+      await onRefresh();
+      await refreshTaggingStatus();
+      onNotify("Hidden tag locked", "info");
+    } catch (err) {
+      onNotify(err instanceof ApiError ? err.message : "Failed to lock hidden tag", "error");
+    } finally {
+      setNsfwBusy(false);
+    }
+  }
+
   return (
     <section className="content-panel" aria-labelledby="tags-heading">
       <div className="panel-header">
@@ -135,7 +197,20 @@ export function TagsView({ tags, onRefresh, onFilterByTag, onNotify }: TagsViewP
             Organize bookmarks with lightweight labels. Click any tag to filter your vault.
           </p>
         </div>
-        <span className="panel-count-pill tabular-nums">{tags.length} tags</span>
+        <div className="panel-header-actions">
+          {showNsfwLockButton && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-compact"
+              onClick={handleLockNsfw}
+              disabled={nsfwBusy}
+            >
+              <Lock size={13} aria-hidden="true" />
+              Lock
+            </button>
+          )}
+          <span className="panel-count-pill tabular-nums">{tags.length} tags</span>
+        </div>
       </div>
 
       <form onSubmit={handleCreate} className="inline-form">
@@ -225,12 +300,62 @@ export function TagsView({ tags, onRefresh, onFilterByTag, onNotify }: TagsViewP
         </div>
       </div>
 
-      {tags.length === 0 ? (
+      {showNsfwUnlock && (
+        <div className="autotag-card" aria-labelledby="nsfw-unlock-heading">
+          <div className="autotag-header">
+            <div>
+              <h2 id="nsfw-unlock-heading" className="autotag-title nsfw-lock-title">
+                <Lock size={14} aria-hidden="true" />
+                <span>Hidden tag</span>
+              </h2>
+              <p className="autotag-subtitle">
+                Enter password to reveal hidden tag and its bookmarks for this session.
+              </p>
+            </div>
+          </div>
+          <form onSubmit={handleUnlockNsfw} className="inline-form">
+            <label className="sr-only" htmlFor="nsfw-unlock-password">
+              Hidden tag password
+            </label>
+            <input
+              ref={nsfwInputRef}
+              id="nsfw-unlock-password"
+              type="password"
+              className="input"
+              placeholder="Password..."
+              autoComplete="current-password"
+              value={nsfwPassword}
+              onChange={(e) => setNsfwPassword(e.target.value)}
+            />
+            <button type="submit" className="btn btn-primary" disabled={nsfwBusy || !nsfwPassword}>
+              <Lock size={15} aria-hidden="true" />
+              Unlock
+            </button>
+          </form>
+        </div>
+      )}
+
+      {tags.length === 0 && !showNsfwUnlock ? (
         <p className="panel-empty">
           No tags yet. Tags added to bookmarks appear here automatically.
         </p>
       ) : (
         <div className="grid-cards">
+          {showNsfwUnlock && (
+            <div className="entity-card">
+              <button
+                type="button"
+                className="entity-card-btn"
+                onClick={() => nsfwInputRef.current?.focus()}
+              >
+                <span className="entity-card-title">
+                  <Lock size={15} aria-hidden="true" className="entity-card-icon" />
+                  <span className="entity-card-name">Hidden tag</span>
+                </span>
+                <span className="entity-card-meta">Locked</span>
+              </button>
+            </div>
+          )}
           {tags.map((tag) => (
             <div key={tag.id} className="entity-card">
               <button
