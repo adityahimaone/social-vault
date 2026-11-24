@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"social-vault/internal/db"
+	"social-vault/internal/tagging"
 )
 
 func (s *Server) handleListBookmarks(w http.ResponseWriter, r *http.Request) {
@@ -115,6 +116,14 @@ func (s *Server) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 		title = cleanURL
 	}
 
+	ruleTags := s.tagger.MatchRules(tagging.Input{
+		URL:         cleanURL,
+		Title:       title,
+		Description: desc,
+		SiteName:    siteName,
+	})
+	mergedTags := tagging.MergeTags(body.Tags, ruleTags)
+
 	created, err := s.store.CreateBookmark(r.Context(), db.CreateBookmarkInput{
 		URL:         cleanURL,
 		Title:       title,
@@ -125,7 +134,7 @@ func (s *Server) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 		SiteName:    siteName,
 		Source:      body.Source,
 		Archived:    body.Archived,
-		Tags:        body.Tags,
+		Tags:        mergedTags,
 		Lists:       body.Lists,
 	})
 	if err != nil {
@@ -139,6 +148,10 @@ func (s *Server) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to save bookmark")
 		return
+	}
+
+	if len(created.Tags) == 0 && s.tagger.JevEnabled() {
+		s.tagger.RunJevAsync(created)
 	}
 
 	writeJSON(w, http.StatusCreated, created)

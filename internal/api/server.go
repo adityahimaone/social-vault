@@ -12,6 +12,7 @@ import (
 	"social-vault/internal/auth"
 	"social-vault/internal/crawler"
 	"social-vault/internal/db"
+	"social-vault/internal/tagging"
 )
 
 const maxJSONBodyBytes = 1 << 20 // 1 MiB
@@ -21,15 +22,20 @@ type Server struct {
 	auth    *auth.Authenticator
 	fetcher *crawler.Fetcher
 	webFS   fs.FS
+	tagger  *tagging.Service
 	mux     *http.ServeMux
 }
 
-func NewServer(store *db.Store, authenticator *auth.Authenticator, fetcher *crawler.Fetcher, webFS fs.FS) *Server {
+func NewServer(store *db.Store, authenticator *auth.Authenticator, fetcher *crawler.Fetcher, webFS fs.FS, tagger *tagging.Service) *Server {
+	if tagger == nil {
+		tagger = tagging.NewService(store, nil)
+	}
 	s := &Server{
 		store:   store,
 		auth:    authenticator,
 		fetcher: fetcher,
 		webFS:   webFS,
+		tagger:  tagger,
 		mux:     http.NewServeMux(),
 	}
 	s.routes()
@@ -66,6 +72,11 @@ func (s *Server) routes() {
 	s.mux.Handle("DELETE /api/lists/{id}", protect(http.HandlerFunc(s.handleDeleteList)))
 
 	s.mux.Handle("POST /api/import", protect(http.HandlerFunc(s.handleImport)))
+
+	s.mux.Handle("GET /api/tag-review", protect(http.HandlerFunc(s.handleListTagReview)))
+	s.mux.Handle("POST /api/tag-review/{id}/apply", protect(http.HandlerFunc(s.handleApplyTagReview)))
+	s.mux.Handle("POST /api/tag-review/{id}/dismiss", protect(http.HandlerFunc(s.handleDismissTagReview)))
+	s.mux.Handle("POST /api/tagging/backfill", protect(http.HandlerFunc(s.handleBackfillTagging)))
 
 	// Return 404 JSON for unmatched /api/* routes, SPA static assets otherwise
 	s.mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {

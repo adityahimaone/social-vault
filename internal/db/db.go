@@ -18,10 +18,11 @@ import (
 )
 
 var (
-	ErrNotFound     = errors.New("not found")
-	ErrDuplicateURL = errors.New("duplicate url")
-	ErrDuplicate    = errors.New("already exists")
-	ErrInvalidInput = errors.New("invalid input")
+	ErrNotFound        = errors.New("not found")
+	ErrDuplicateURL    = errors.New("duplicate url")
+	ErrDuplicate       = errors.New("already exists")
+	ErrInvalidInput    = errors.New("invalid input")
+	ErrAlreadyResolved = errors.New("already resolved")
 )
 
 type Store struct {

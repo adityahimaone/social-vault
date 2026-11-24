@@ -31,7 +31,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *db.Store) {
 	webFS := fstest.MapFS{
 		"index.html": {Data: []byte("<!doctype html><html><title>Social Vault</title></html>")},
 	}
-	srv := api.NewServer(store, authenticator, fetcher, webFS)
+	srv := api.NewServer(store, authenticator, fetcher, webFS, nil)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, store

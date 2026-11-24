@@ -31,7 +31,7 @@ func setupVaultAndMCP(t *testing.T, apiKey string) (*sdkmcp.ClientSession, *db.S
 	authenticator := auth.New(store, "test-pass", "valid-api-key")
 	fetcher := crawler.NewFetcher(nil)
 	webFS := fstest.MapFS{"index.html": {Data: []byte("<html></html>")}}
-	apiSrv := api.NewServer(store, authenticator, fetcher, webFS)
+	apiSrv := api.NewServer(store, authenticator, fetcher, webFS, nil)
 
 	httpSrv := httptest.NewServer(apiSrv.Handler())
 	t.Cleanup(httpSrv.Close)
@@ -128,6 +128,8 @@ func TestMCPToolsEndToEnd(t *testing.T) {
 		"list_lists",
 		"get_stats",
 		"update_bookmark",
+		"list_tag_review",
+		"resolve_tag_review",
 	}
 	gotNames := make([]string, 0, len(listRes.Tools))
 	toolMap := make(map[string]*sdkmcp.Tool, len(listRes.Tools))
@@ -258,8 +260,9 @@ func TestMCPToolsEndToEnd(t *testing.T) {
 	}
 	var tagsOut mcp.TagListOutput
 	decodeToolText(t, tagsRes, &tagsOut)
-	if tagsOut.Total != 2 {
-		t.Fatalf("expected 2 tags, got %+v", tagsOut)
+	// User provided [golang, mcp], plus Layer 1 rule tags [ai, tools] from "MCP".
+	if tagsOut.Total != 4 {
+		t.Fatalf("expected 4 tags (user + layer 1 rules), got %+v", tagsOut)
 	}
 
 	listsRes, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "list_lists", Arguments: map[string]any{}})
@@ -278,8 +281,64 @@ func TestMCPToolsEndToEnd(t *testing.T) {
 	}
 	var statsOut mcp.CompactStats
 	decodeToolText(t, statsRes, &statsOut)
-	if statsOut.Total != 1 || statsOut.Archived != 1 || statsOut.TagsCount != 2 || statsOut.ListsCount != 1 {
+	if statsOut.Total != 1 || statsOut.Archived != 1 || statsOut.TagsCount != 4 || statsOut.ListsCount != 1 {
 		t.Fatalf("unexpected stats: %+v", statsOut)
+	}
+
+	// 6. list_tag_review & resolve_tag_review (apply and dismiss)
+	bmDismiss, err := store.CreateBookmark(ctx, db.CreateBookmarkInput{
+		URL:   targetURL + "/dismiss-target",
+		Title: "Dismiss Target",
+	})
+	if err != nil {
+		t.Fatalf("create bmDismiss: %v", err)
+	}
+	itemApply, _, err := store.EnqueueTagReview(ctx, added.Bookmark.ID, []string{"reading"}, map[string]float64{"reading": 0.68}, "jev")
+	if err != nil {
+		t.Fatalf("enqueue apply item: %v", err)
+	}
+	itemDismiss, _, err := store.EnqueueTagReview(ctx, bmDismiss.ID, []string{"finance"}, map[string]float64{"finance": 0.55}, "jev")
+	if err != nil {
+		t.Fatalf("enqueue dismiss item: %v", err)
+	}
+
+	reviewListRes, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "list_tag_review",
+		Arguments: map[string]any{"limit": 10},
+	})
+	if err != nil || reviewListRes.IsError {
+		t.Fatalf("list_tag_review failed: err=%v res=%+v", err, reviewListRes)
+	}
+	var reviewListOut mcp.TagReviewListOutput
+	decodeToolText(t, reviewListRes, &reviewListOut)
+	if reviewListOut.Total != 2 {
+		t.Fatalf("expected 2 pending review items, got %+v", reviewListOut)
+	}
+
+	applyRes, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "resolve_tag_review",
+		Arguments: map[string]any{"id": itemApply.ID, "action": "apply"},
+	})
+	if err != nil || applyRes.IsError {
+		t.Fatalf("resolve_tag_review apply failed: err=%v res=%+v", err, applyRes)
+	}
+	var applyOut mcp.ResolveTagReviewOutput
+	decodeToolText(t, applyRes, &applyOut)
+	if applyOut.Item.Status != "applied" || applyOut.Bookmark == nil || !slices.Contains(applyOut.Bookmark.Tags, "reading") || !slices.Contains(applyOut.Bookmark.Tags, "golang") {
+		t.Fatalf("unexpected apply output: %+v", applyOut)
+	}
+
+	dismissRes, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "resolve_tag_review",
+		Arguments: map[string]any{"id": itemDismiss.ID, "action": "dismiss"},
+	})
+	if err != nil || dismissRes.IsError {
+		t.Fatalf("resolve_tag_review dismiss failed: err=%v res=%+v", err, dismissRes)
+	}
+	var dismissOut mcp.ResolveTagReviewOutput
+	decodeToolText(t, dismissRes, &dismissOut)
+	if dismissOut.Item.Status != "dismissed" {
+		t.Fatalf("unexpected dismiss output: %+v", dismissOut)
 	}
 }
 

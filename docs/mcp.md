@@ -59,6 +59,8 @@ never commit it.
 | `list_tags` | All tags with bookmark counts | — |
 | `list_lists` | All collections with bookmark counts | — |
 | `get_stats` | Totals, active/archived counts, tag/list counts, top tags | — |
+| `list_tag_review` | List pending Layer 3 tag suggestions queued by Jev (0.5–0.8) | `limit` (default 20) |
+| `resolve_tag_review` | Apply (merge) or dismiss a pending tag review item | `id` (required), `action` (`apply` \| `dismiss`) |
 
 ### Dedup
 
@@ -133,13 +135,36 @@ printf '%s\n' \
 ```
 
 Expect an `initialize` result (`serverInfo.name: "social-vault-mcp"`) and a
-`tools/list` result with all 8 tools.
+`tools/list` result with all 10 tools.
 
 ## Agent tagging workflow
 
-Bulk saves from the browser extension arrive **untagged by design** —
-tagging depends on what each post actually is, so it belongs to an agent,
-not to a fixed form. The intended flow:
+Social Vault runs a **three-layer hybrid auto-tagging** pipeline on saved
+bookmarks (always preserving user-supplied tags and strictly using the fixed
+19-tag vocabulary: `ai`, `design`, `tools`, `development`, `deals`, `web`,
+`reading`, `career`, `news`, `entertainment`, `lifestyle`, `kpop`, `finance`,
+`gaming`, `nsfw`, `security`, `rust`, `sports`, `golang`):
+
+1. **Layer 1 (Rules, synchronous at save):** Deterministic curated keyword/phrase
+   rules run on `title`, `description`, `site_name`, and URL host and merge
+   directly on save.
+2. **Layer 2 (Jev, async after save):** When Layer 1 produces zero tags (and
+   `JEV_API_KEY` is configured), Jev (`jev-1.13.0`) scores all 19 tags.
+   Scores `>= 0.8` are merged automatically; scores in `[0.5, 0.8)` are queued
+   for review instead of being auto-applied.
+3. **Layer 3 (Agent review queue via MCP):** Agents review uncertain Jev
+   suggestions and untagged items:
+   - Call `list_tag_review` to fetch pending suggestions (`id`, `bookmark_id`,
+     `bookmark_title`, `bookmark_url`, `suggested_tags`, `jev_scores`).
+   - Call `get_bookmark { "id": <bookmark_id> }` to inspect full context.
+   - If the suggested tags fit, call
+     `resolve_tag_review { "id": <review_id>, "action": "apply" }` (merges
+     without removing existing tags). If you want a different set of tags from
+     the 19-tag vocabulary, dismiss the queue row and call `update_bookmark`.
+   - If the suggested tags are wrong, call
+     `resolve_tag_review { "id": <review_id>, "action": "dismiss" }`.
+
+For bookmarks with no tags and no pending review item (e.g., thin metadata):
 
 1. **Find untagged bookmarks.** `list_bookmarks` with a high `limit`, or
    `search_bookmarks` for a topic, then `get_bookmark` for the ones with

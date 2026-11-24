@@ -126,6 +126,43 @@ type ListCollectionsOutput struct {
 	Total int           `json:"total"`
 }
 
+// CompactTagReviewItem is a concise representation of a pending tag review entry.
+type CompactTagReviewItem struct {
+	ID            int64              `json:"id"`
+	BookmarkID    int64              `json:"bookmark_id"`
+	BookmarkTitle string             `json:"bookmark_title"`
+	BookmarkURL   string             `json:"bookmark_url"`
+	SuggestedTags []string           `json:"suggested_tags"`
+	JevScores     map[string]float64 `json:"jev_scores"`
+	Source        string             `json:"source"`
+	Status        string             `json:"status"`
+	CreatedAt     string             `json:"created_at"`
+	ResolvedAt    string             `json:"resolved_at,omitempty"`
+}
+
+// ListTagReviewInput defines parameters for list_tag_review.
+type ListTagReviewInput struct {
+	Limit int `json:"limit,omitempty" jsonschema:"Maximum pending review items to return (1-100, default 20)"`
+}
+
+// TagReviewListOutput is returned by list_tag_review.
+type TagReviewListOutput struct {
+	Items []CompactTagReviewItem `json:"items"`
+	Total int                    `json:"total"`
+}
+
+// ResolveTagReviewInput defines parameters for resolve_tag_review.
+type ResolveTagReviewInput struct {
+	ID     int64  `json:"id" jsonschema:"Tag review queue item ID"`
+	Action string `json:"action" jsonschema:"Resolution action: apply or dismiss"`
+}
+
+// ResolveTagReviewOutput is returned by resolve_tag_review.
+type ResolveTagReviewOutput struct {
+	Item     CompactTagReviewItem `json:"item"`
+	Bookmark *CompactBookmark     `json:"bookmark,omitempty"`
+}
+
 // NewServer registers all Social Vault MCP tools backed by the HTTP API client.
 func NewServer(client *Client) *sdkmcp.Server {
 	srv := sdkmcp.NewServer(&sdkmcp.Implementation{
@@ -322,7 +359,73 @@ func NewServer(client *Client) *sdkmcp.Server {
 		return nil, BookmarkOutput{Bookmark: toCompactBookmark(*updated, true)}, nil
 	})
 
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{
+		Name:        "list_tag_review",
+		Description: "List pending auto-tagging suggestions queued by Jev (scores 0.5-0.8) for agent review.",
+	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, in ListTagReviewInput) (*sdkmcp.CallToolResult, TagReviewListOutput, error) {
+		limit, err := normalizeLimit(in.Limit)
+		if err != nil {
+			return nil, TagReviewListOutput{}, err
+		}
+		res, err := client.ListTagReview(ctx, limit)
+		if err != nil {
+			return nil, TagReviewListOutput{}, err
+		}
+		items := make([]CompactTagReviewItem, 0, len(res.Items))
+		for _, item := range res.Items {
+			items = append(items, toCompactTagReviewItem(item))
+		}
+		return nil, TagReviewListOutput{Items: items, Total: len(items)}, nil
+	})
+
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{
+		Name:        "resolve_tag_review",
+		Description: "Apply or dismiss a pending tag review queue item by ID.",
+	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, in ResolveTagReviewInput) (*sdkmcp.CallToolResult, ResolveTagReviewOutput, error) {
+		if in.ID <= 0 {
+			return nil, ResolveTagReviewOutput{}, errors.New("id must be a positive integer")
+		}
+		action := strings.ToLower(strings.TrimSpace(in.Action))
+		switch action {
+		case "apply":
+			res, err := client.ApplyTagReview(ctx, in.ID)
+			if err != nil {
+				return nil, ResolveTagReviewOutput{}, err
+			}
+			bm := toCompactBookmark(res.Bookmark, false)
+			return nil, ResolveTagReviewOutput{
+				Item:     toCompactTagReviewItem(res.Item),
+				Bookmark: &bm,
+			}, nil
+		case "dismiss":
+			res, err := client.DismissTagReview(ctx, in.ID)
+			if err != nil {
+				return nil, ResolveTagReviewOutput{}, err
+			}
+			return nil, ResolveTagReviewOutput{
+				Item: toCompactTagReviewItem(res.Item),
+			}, nil
+		default:
+			return nil, ResolveTagReviewOutput{}, errors.New("action must be 'apply' or 'dismiss'")
+		}
+	})
+
 	return srv
+}
+
+func toCompactTagReviewItem(item APITagReviewItem) CompactTagReviewItem {
+	return CompactTagReviewItem{
+		ID:            item.ID,
+		BookmarkID:    item.BookmarkID,
+		BookmarkTitle: item.BookmarkTitle,
+		BookmarkURL:   item.BookmarkURL,
+		SuggestedTags: item.SuggestedTags,
+		JevScores:     item.JevScores,
+		Source:        item.Source,
+		Status:        item.Status,
+		CreatedAt:     item.CreatedAt,
+		ResolvedAt:    item.ResolvedAt,
+	}
 }
 
 func toBookmarkListOutput(res *BookmarkListResponse) BookmarkListOutput {

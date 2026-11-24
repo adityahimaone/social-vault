@@ -17,6 +17,7 @@ import (
 	"social-vault/internal/auth"
 	"social-vault/internal/crawler"
 	"social-vault/internal/db"
+	"social-vault/internal/tagging"
 )
 
 //go:embed all:web/dist
@@ -27,6 +28,7 @@ func main() {
 	dataDir := envOrDefault("DATA_DIR", "./data")
 	password := os.Getenv("VAULT_PASSWORD")
 	apiKey := os.Getenv("VAULT_API_KEY")
+	jevAPIKey := strings.TrimSpace(os.Getenv("JEV_API_KEY"))
 
 	store, err := db.Open(dataDir)
 	if err != nil {
@@ -47,7 +49,9 @@ func main() {
 
 	authenticator := auth.New(store, password, apiKey)
 	fetcher := crawler.NewFetcher(nil)
-	srv := api.NewServer(store, authenticator, fetcher, webFS)
+	jevClient := tagging.NewJevClient(jevAPIKey)
+	tagger := tagging.NewService(store, jevClient)
+	srv := api.NewServer(store, authenticator, fetcher, webFS, tagger)
 
 	httpServer := &http.Server{
 		Addr:              addr,
@@ -60,6 +64,9 @@ func main() {
 	}
 	if apiKey == "" {
 		log.Printf("warning: VAULT_API_KEY is empty; API key authentication is disabled")
+	}
+	if jevAPIKey == "" {
+		log.Printf("warning: JEV_API_KEY is empty; layer 2 Jev auto-tagging is disabled")
 	}
 
 	go func() {
@@ -78,6 +85,7 @@ func main() {
 	if err := httpServer.Shutdown(ctx); err != nil {
 		log.Printf("graceful shutdown error: %v", err)
 	}
+	tagger.Wait()
 }
 
 func envOrDefault(key, fallback string) string {

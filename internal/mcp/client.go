@@ -150,6 +150,37 @@ type BookmarkListResponse struct {
 	Offset int           `json:"offset"`
 }
 
+// APITagReviewItem mirrors one item returned by GET /api/tag-review.
+type APITagReviewItem struct {
+	ID            int64              `json:"id"`
+	BookmarkID    int64              `json:"bookmark_id"`
+	BookmarkTitle string             `json:"bookmark_title"`
+	BookmarkURL   string             `json:"bookmark_url"`
+	SuggestedTags []string           `json:"suggested_tags"`
+	JevScores     map[string]float64 `json:"jev_scores"`
+	Source        string             `json:"source"`
+	Status        string             `json:"status"`
+	CreatedAt     string             `json:"created_at"`
+	ResolvedAt    string             `json:"resolved_at,omitempty"`
+}
+
+// TagReviewListResponse mirrors GET /api/tag-review.
+type TagReviewListResponse struct {
+	Items []APITagReviewItem `json:"items"`
+	Total int                `json:"total"`
+}
+
+// ApplyTagReviewResponse mirrors POST /api/tag-review/{id}/apply.
+type ApplyTagReviewResponse struct {
+	Item     APITagReviewItem `json:"item"`
+	Bookmark APIBookmark      `json:"bookmark"`
+}
+
+// DismissTagReviewResponse mirrors POST /api/tag-review/{id}/dismiss.
+type DismissTagReviewResponse struct {
+	Item APITagReviewItem `json:"item"`
+}
+
 // ListBookmarksParams configures GET /api/bookmarks query parameters.
 type ListBookmarksParams struct {
 	Query    string
@@ -272,6 +303,37 @@ func (c *Client) ListLists(ctx context.Context) ([]APIList, error) {
 func (c *Client) GetStats(ctx context.Context) (*APIStats, error) {
 	var out APIStats
 	if err := c.doJSON(ctx, http.MethodGet, "/api/stats", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListTagReview fetches pending tag review items via GET /api/tag-review.
+func (c *Client) ListTagReview(ctx context.Context, limit int) (*TagReviewListResponse, error) {
+	path := "/api/tag-review"
+	if limit > 0 {
+		path += "?limit=" + strconv.Itoa(limit)
+	}
+	var out TagReviewListResponse
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ApplyTagReview applies suggested tags for a review item via POST /api/tag-review/{id}/apply.
+func (c *Client) ApplyTagReview(ctx context.Context, id int64) (*ApplyTagReviewResponse, error) {
+	var out ApplyTagReviewResponse
+	if err := c.doJSON(ctx, http.MethodPost, fmt.Sprintf("/api/tag-review/%d/apply", id), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DismissTagReview dismisses a review item via POST /api/tag-review/{id}/dismiss.
+func (c *Client) DismissTagReview(ctx context.Context, id int64) (*DismissTagReviewResponse, error) {
+	var out DismissTagReviewResponse
+	if err := c.doJSON(ctx, http.MethodPost, fmt.Sprintf("/api/tag-review/%d/dismiss", id), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
