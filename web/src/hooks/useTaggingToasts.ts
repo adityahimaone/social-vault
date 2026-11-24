@@ -11,6 +11,9 @@ export function useTaggingToasts(authenticated: boolean, notify: NotifyFn): void
   const lastSeenSeqRef = useRef(0);
   const wasActiveRef = useRef(false);
   const lastActiveKeyRef = useRef("");
+  const wasBackfillRunningRef = useRef(false);
+  const lastBackfillStartedAtRef = useRef("");
+  const lastBackfillFinishedAtRef = useRef("");
   const inFlightRef = useRef(false);
 
   useEffect(() => {
@@ -19,6 +22,9 @@ export function useTaggingToasts(authenticated: boolean, notify: NotifyFn): void
       lastSeenSeqRef.current = 0;
       wasActiveRef.current = false;
       lastActiveKeyRef.current = "";
+      wasBackfillRunningRef.current = false;
+      lastBackfillStartedAtRef.current = "";
+      lastBackfillFinishedAtRef.current = "";
       inFlightRef.current = false;
       return;
     }
@@ -57,19 +63,49 @@ export function useTaggingToasts(authenticated: boolean, notify: NotifyFn): void
           lastActiveKeyRef.current = "";
         }
 
-        const ev = status.last_jev_event;
+        const bf = status.last_backfill;
         if (!initializedRef.current) {
           initializedRef.current = true;
-          lastSeenSeqRef.current = ev?.seq ?? 0;
+          lastSeenSeqRef.current = status.last_jev_event?.seq ?? 0;
+          lastBackfillFinishedAtRef.current = bf?.finished_at ?? "";
+          if (bf?.running) {
+            if (bf.started_at !== lastBackfillStartedAtRef.current) {
+              notify("Backfill berjalan…", "info");
+              lastBackfillStartedAtRef.current = bf.started_at;
+            }
+            wasBackfillRunningRef.current = true;
+          } else {
+            wasBackfillRunningRef.current = false;
+          }
           return;
         }
 
+        if (bf?.running) {
+          if (!wasBackfillRunningRef.current && bf.started_at !== lastBackfillStartedAtRef.current) {
+            notify("Backfill berjalan…", "info");
+            lastBackfillStartedAtRef.current = bf.started_at;
+          }
+          wasBackfillRunningRef.current = true;
+        } else if (wasBackfillRunningRef.current) {
+          wasBackfillRunningRef.current = false;
+          if (bf?.finished_at && bf.finished_at !== lastBackfillFinishedAtRef.current) {
+            lastBackfillFinishedAtRef.current = bf.finished_at;
+            const tagged = (bf.result?.rules_tagged ?? 0) + (bf.result?.jev_tagged ?? 0);
+            const queued = bf.result?.queued ?? 0;
+            if (tagged === 0 && queued === 0) {
+              notify("Backfill selesai — tidak ada yang ke-tag", "info");
+            } else {
+              notify(`Backfill selesai: ${tagged} ter-tag, ${queued} masuk antrean`, "success");
+            }
+          }
+        } else if (bf?.finished_at) {
+          lastBackfillFinishedAtRef.current = bf.finished_at;
+        }
+
+        const ev = status.last_jev_event;
         if (!ev) {
           lastSeenSeqRef.current = 0;
-          return;
-        }
-
-        if (ev.seq > 0 && ev.seq !== lastSeenSeqRef.current) {
+        } else if (ev.seq > 0 && ev.seq !== lastSeenSeqRef.current) {
           const parsedFinished = Date.parse(ev.finished_at);
           const isNew =
             ev.seq > lastSeenSeqRef.current ||

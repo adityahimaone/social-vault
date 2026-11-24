@@ -164,7 +164,7 @@ bookmarks (always preserving user-supplied tags and strictly using the fixed
    - If the suggested tags are wrong, call
      `resolve_tag_review { "id": <review_id>, "action": "dismiss" }`.
 
-The authenticated HTTP endpoint `GET /api/tagging/status` reports live tagging state (`jev_enabled`, `active_jev_jobs`, `last_jev_event`, `last_backfill`, and `pending_review`), which the web dashboard polls to display progress and outcome toasts. `POST /api/tagging/backfill` skips bookmarks that already have tags or any `tag_review_queue` row (`pending`, `applied`, or `dismissed`), so dismissed suggestions are not re-queued on later backfills.
+The authenticated HTTP endpoint `GET /api/tagging/status` reports live tagging state (`jev_enabled`, `active_jev_jobs`, `last_jev_event`, `last_backfill`, `pending_review`, and `untagged_count`), which the web dashboard polls to display progress and outcome toasts. `POST /api/tagging/backfill` accepts an optional `layers` array (`"rules"`, `"jev"`, or both when omitted/empty), rejects unknown layers or `"jev"` when `JEV_API_KEY` is unset with `400`, returns `409` if a backfill is already running, and skips bookmarks that already have tags or any `tag_review_queue` row (`pending`, `applied`, or `dismissed`) so dismissed suggestions are not re-queued on later backfills.
 
 For bookmarks with no tags and no pending review item (e.g., thin metadata):
 

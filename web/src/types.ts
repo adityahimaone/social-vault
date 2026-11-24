@@ -83,6 +83,7 @@ export interface TaggingStatus {
   last_jev_event: JevEvent | null;
   last_backfill: BackfillStatus;
   pending_review: number;
+  untagged_count: number;
 }
 
 export type ActiveView = "bookmarks" | "tags" | "lists" | "import";

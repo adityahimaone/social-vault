@@ -1,18 +1,72 @@
-import { useState, type FormEvent } from "react";
-import { Hash, Plus, Trash2 } from "lucide-react";
-import { api, ApiError } from "../api";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Hash, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
+import { api, ApiError, type TaggingStatus } from "../api";
 import type { Tag } from "../types";
+
+type LayerChoice = "rules" | "jev" | "both";
+
+const LAYER_OPTIONS: ReadonlyArray<{
+  value: LayerChoice;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: "rules",
+    label: "Rules saja",
+    hint: "Cepat, gratis, presisi ~94%",
+  },
+  {
+    value: "jev",
+    label: "Jev saja",
+    hint: "Butuh key, ~1 detik/bookmark, threshold 0.8",
+  },
+  {
+    value: "both",
+    label: "Keduanya",
+    hint: "Rules dulu, Jev untuk sisanya",
+  },
+];
+
+function layersForChoice(choice: LayerChoice): string[] {
+  if (choice === "rules") return ["rules"];
+  if (choice === "jev") return ["jev"];
+  return ["rules", "jev"];
+}
 
 interface TagsViewProps {
   tags: Tag[];
   onRefresh: () => Promise<void>;
   onFilterByTag: (tagName: string) => void;
-  onNotify: (msg: string, tone: "success" | "error") => void;
+  onNotify: (msg: string, tone: "success" | "error" | "info") => void;
 }
 
 export function TagsView({ tags, onRefresh, onFilterByTag, onNotify }: TagsViewProps) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [taggingStatus, setTaggingStatus] = useState<TaggingStatus | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
+  const [layerChoice, setLayerChoice] = useState<LayerChoice>("both");
+  const [backfilling, setBackfilling] = useState(false);
+
+  const refreshTaggingStatus = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const st = await api.taggingStatus(signal);
+      if (signal?.aborted) return;
+      setTaggingStatus(st);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+    } finally {
+      if (!signal?.aborted) {
+        setStatusLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    void refreshTaggingStatus(ctrl.signal);
+    return () => ctrl.abort();
+  }, [refreshTaggingStatus]);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -35,9 +89,38 @@ export function TagsView({ tags, onRefresh, onFilterByTag, onNotify }: TagsViewP
     try {
       await api.deleteTag(tag.id);
       await onRefresh();
+      await refreshTaggingStatus();
       onNotify(`Deleted tag #${tag.name}`, "success");
     } catch (err) {
       onNotify(err instanceof ApiError ? err.message : "Failed to delete tag", "error");
+    }
+  }
+
+  const untaggedCount = taggingStatus?.untagged_count ?? 0;
+  const isBackfillRunning = backfilling || Boolean(taggingStatus?.last_backfill?.running);
+
+  async function handleBackfill() {
+    if (isBackfillRunning || untaggedCount === 0) return;
+    setBackfilling(true);
+    try {
+      const res = await api.taggingBackfill(layersForChoice(layerChoice));
+      await onRefresh();
+      const parts = [
+        `rules_tagged: ${res.rules_tagged}`,
+        `jev_tagged: ${res.jev_tagged}`,
+        `queued: ${res.queued}`,
+        `skipped: ${res.skipped}`,
+      ];
+      if (res.failed > 0) {
+        parts.push(`failed: ${res.failed}`);
+      }
+      const anyTagged = res.rules_tagged + res.jev_tagged > 0;
+      onNotify(`Backfill selesai (${parts.join(", ")})`, anyTagged ? "success" : "info");
+    } catch (err) {
+      onNotify(err instanceof ApiError ? err.message : "Gagal menjalankan backfill", "error");
+    } finally {
+      setBackfilling(false);
+      await refreshTaggingStatus();
     }
   }
 
@@ -72,6 +155,75 @@ export function TagsView({ tags, onRefresh, onFilterByTag, onNotify }: TagsViewP
           Add tag
         </button>
       </form>
+
+      <div className="autotag-card" aria-labelledby="autotag-heading">
+        <div className="autotag-header">
+          <div>
+            <h2 id="autotag-heading" className="autotag-title">
+              Auto-tagging
+            </h2>
+            <p className="autotag-subtitle">
+              Jalankan auto-tagging pada bookmark yang belum punya tag.
+            </p>
+          </div>
+          <div className="autotag-badges">
+            {taggingStatus && !taggingStatus.jev_enabled && (
+              <span className="autotag-muted-pill">Jev tidak aktif</span>
+            )}
+            <span className="panel-count-pill tabular-nums">
+              {statusLoading
+                ? "Memuat status…"
+                : `${untaggedCount} bookmark belum ber-tag`}
+            </span>
+          </div>
+        </div>
+
+        <div className="autotag-layers" role="radiogroup" aria-labelledby="autotag-heading">
+          {LAYER_OPTIONS.map((opt) => {
+            const selected = layerChoice === opt.value;
+            return (
+              <label
+                key={opt.value}
+                className={`autotag-option ${selected ? "is-selected" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name="backfill-layer"
+                  value={opt.value}
+                  checked={selected}
+                  disabled={isBackfillRunning}
+                  onChange={() => setLayerChoice(opt.value)}
+                />
+                <span className="autotag-option-copy">
+                  <span className="autotag-option-title">{opt.label}</span>
+                  <span className="autotag-option-hint">{opt.hint}</span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+
+        <div className="autotag-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={statusLoading || isBackfillRunning || untaggedCount === 0}
+            onClick={handleBackfill}
+          >
+            {isBackfillRunning ? (
+              <>
+                <Loader2 size={15} className="spin" aria-hidden="true" />
+                Menjalankan backfill…
+              </>
+            ) : (
+              <>
+                <Sparkles size={15} aria-hidden="true" />
+                Tag ulang yang belum ber-tag
+              </>
+            )}
+          </button>
+        </div>
+      </div>
 
       {tags.length === 0 ? (
         <p className="panel-empty">

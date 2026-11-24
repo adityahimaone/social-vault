@@ -1,6 +1,6 @@
-import type { Bookmark, ImportResult, List, Stats, Tag, TaggingStatus } from "./types";
+import type { BackfillResult, Bookmark, ImportResult, List, Stats, Tag, TaggingStatus } from "./types";
 
-export type { TaggingStatus } from "./types";
+export type { BackfillResult, TaggingStatus } from "./types";
 
 let onUnauthorizedHandler: (() => void) | null = null;
 
@@ -160,4 +160,10 @@ export const api = {
 
   taggingStatus: (signal?: AbortSignal) =>
     request<TaggingStatus>("/api/tagging/status", { signal }),
+
+  taggingBackfill: (layers?: string[]) =>
+    request<BackfillResult>("/api/tagging/backfill", {
+      method: "POST",
+      body: JSON.stringify(layers && layers.length > 0 ? { layers } : {}),
+    }),
 };

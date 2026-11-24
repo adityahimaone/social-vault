@@ -82,7 +82,8 @@ func (s *Server) handleDismissTagReview(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleBackfillTagging(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Limit int `json:"limit"`
+		Limit  int      `json:"limit"`
+		Layers []string `json:"layers"`
 	}
 	if r.Body != nil {
 		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
@@ -104,9 +105,16 @@ func (s *Server) handleBackfillTagging(w http.ResponseWriter, r *http.Request) {
 		limit = tagging.DefaultBackfillLimit
 	}
 
-	result, err := s.tagger.Backfill(r.Context(), limit)
+	result, err := s.tagger.Backfill(r.Context(), limit, body.Layers...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to backfill bookmark tags")
+		switch {
+		case errors.Is(err, tagging.ErrInvalidLayer), errors.Is(err, tagging.ErrJevDisabled):
+			writeError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, tagging.ErrBackfillRunning):
+			writeError(w, http.StatusConflict, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to backfill bookmark tags")
+		}
 		return
 	}
 

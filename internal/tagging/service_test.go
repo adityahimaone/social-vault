@@ -3,11 +3,13 @@ package tagging_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -260,6 +262,235 @@ func TestServiceStatusTrackingAndBackfill(t *testing.T) {
 		}
 		if afterBF.LastJevEvent == nil || afterBF.LastJevEvent.Seq != 3 {
 			t.Fatalf("expected backfill NOT to modify LastJevEvent.Seq, got %+v", afterBF.LastJevEvent)
+		}
+	})
+}
+
+func TestBackfillLayerSelectionAndConcurrency(t *testing.T) {
+	t.Run("rules-only backfill never calls Jev", func(t *testing.T) {
+		store, err := db.Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("open db: %v", err)
+		}
+		defer func() { _ = store.Close() }()
+
+		var jevCalls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			jevCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"model":"jev-1.13.0","answers":{"ai":{"type":"noul","noul":0.95}}}`))
+		}))
+		defer srv.Close()
+
+		ctx := context.Background()
+		svc := tagging.NewService(store, tagging.NewJevClientWithOptions("stub-key", srv.URL, nil))
+
+		bmRust, err := store.CreateBookmark(ctx, db.CreateBookmarkInput{
+			URL:   "https://crates.io/crates/tokio",
+			Title: "Tokio async runtime in Rust",
+		})
+		if err != nil {
+			t.Fatalf("create bmRust: %v", err)
+		}
+		_, err = store.CreateBookmark(ctx, db.CreateBookmarkInput{
+			URL:   "https://example.org/opaque",
+			Title: "Opaque Note",
+		})
+		if err != nil {
+			t.Fatalf("create bmOpaque: %v", err)
+		}
+
+		stBefore, err := svc.Status(ctx)
+		if err != nil {
+			t.Fatalf("Status before: %v", err)
+		}
+		if stBefore.UntaggedCount != 2 {
+			t.Fatalf("expected UntaggedCount=2, got %d", stBefore.UntaggedCount)
+		}
+
+		res, err := svc.Backfill(ctx, 10, tagging.LayerRules)
+		if err != nil {
+			t.Fatalf("Backfill rules-only: %v", err)
+		}
+		if res.Processed != 2 || res.RulesTagged != 1 || res.JevTagged != 0 || res.Queued != 0 || res.Skipped != 1 {
+			t.Fatalf("unexpected rules-only result: %+v", res)
+		}
+		if jevCalls.Load() != 0 {
+			t.Fatalf("expected 0 Jev calls on rules-only backfill, got %d", jevCalls.Load())
+		}
+
+		reloaded, err := store.GetBookmark(ctx, bmRust.ID)
+		if err != nil {
+			t.Fatalf("get bmRust: %v", err)
+		}
+		var tagNames []string
+		for _, tg := range reloaded.Tags {
+			tagNames = append(tagNames, tg.Name)
+		}
+		if !slices.Contains(tagNames, "rust") {
+			t.Fatalf("expected rust tag on bmRust, got %v", tagNames)
+		}
+
+		stAfter, err := svc.Status(ctx)
+		if err != nil {
+			t.Fatalf("Status after: %v", err)
+		}
+		if stAfter.UntaggedCount != 1 {
+			t.Fatalf("expected UntaggedCount=1 after rules-only backfill, got %d", stAfter.UntaggedCount)
+		}
+	})
+
+	t.Run("jev-only backfill never applies rules", func(t *testing.T) {
+		store, err := db.Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("open db: %v", err)
+		}
+		defer func() { _ = store.Close() }()
+
+		var jevCalls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			jevCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"model":"jev-1.13.0","answers":{"ai":{"type":"noul","noul":0.95}}}`))
+		}))
+		defer srv.Close()
+
+		ctx := context.Background()
+		svc := tagging.NewService(store, tagging.NewJevClientWithOptions("stub-key", srv.URL, nil))
+
+		bmRust, err := store.CreateBookmark(ctx, db.CreateBookmarkInput{
+			URL:   "https://crates.io/crates/serde",
+			Title: "Serde serialization in Rust",
+		})
+		if err != nil {
+			t.Fatalf("create bmRust: %v", err)
+		}
+
+		res, err := svc.Backfill(ctx, 10, tagging.LayerJev)
+		if err != nil {
+			t.Fatalf("Backfill jev-only: %v", err)
+		}
+		if res.Processed != 1 || res.RulesTagged != 0 || res.JevTagged != 1 {
+			t.Fatalf("unexpected jev-only result: %+v", res)
+		}
+		if jevCalls.Load() != 1 {
+			t.Fatalf("expected 1 Jev call, got %d", jevCalls.Load())
+		}
+
+		reloaded, err := store.GetBookmark(ctx, bmRust.ID)
+		if err != nil {
+			t.Fatalf("get bmRust: %v", err)
+		}
+		if len(reloaded.Tags) != 1 || reloaded.Tags[0].Name != "ai" {
+			t.Fatalf("expected only Jev tag [ai] (no rule tag), got %+v", reloaded.Tags)
+		}
+	})
+
+	t.Run("invalid layer and disabled Jev errors without partial run", func(t *testing.T) {
+		store, err := db.Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("open db: %v", err)
+		}
+		defer func() { _ = store.Close() }()
+
+		ctx := context.Background()
+		svc := tagging.NewService(store, tagging.NewJevClient(""))
+
+		bmRust, err := store.CreateBookmark(ctx, db.CreateBookmarkInput{
+			URL:   "https://crates.io/crates/clap",
+			Title: "Clap CLI in Rust",
+		})
+		if err != nil {
+			t.Fatalf("create bmRust: %v", err)
+		}
+
+		for _, bad := range []string{"mcp", ""} {
+			if _, err := svc.Backfill(ctx, 10, bad); !errors.Is(err, tagging.ErrInvalidLayer) {
+				t.Fatalf("expected ErrInvalidLayer for %q, got %v", bad, err)
+			}
+		}
+
+		if _, err := svc.Backfill(ctx, 10, tagging.LayerJev); !errors.Is(err, tagging.ErrJevDisabled) {
+			t.Fatalf("expected ErrJevDisabled for jev-only when disabled, got %v", err)
+		}
+		if _, err := svc.Backfill(ctx, 10, tagging.LayerRules, tagging.LayerJev); !errors.Is(err, tagging.ErrJevDisabled) {
+			t.Fatalf("expected ErrJevDisabled for rules+jev when disabled, got %v", err)
+		}
+
+		reloaded, err := store.GetBookmark(ctx, bmRust.ID)
+		if err != nil {
+			t.Fatalf("get bmRust: %v", err)
+		}
+		if len(reloaded.Tags) != 0 {
+			t.Fatalf("expected no partial tagging on error, got %+v", reloaded.Tags)
+		}
+	})
+
+	t.Run("concurrent backfill returns ErrBackfillRunning", func(t *testing.T) {
+		store, err := db.Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("open db: %v", err)
+		}
+		defer func() { _ = store.Close() }()
+
+		startedCh := make(chan struct{}, 1)
+		releaseCh := make(chan struct{})
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case startedCh <- struct{}{}:
+			default:
+			}
+			<-releaseCh
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"model":"jev-1.13.0","answers":{"ai":{"type":"noul","noul":0.92}}}`))
+		}))
+		defer srv.Close()
+
+		ctx := context.Background()
+		svc := tagging.NewService(store, tagging.NewJevClientWithOptions("stub-key", srv.URL, nil))
+		_, err = store.CreateBookmark(ctx, db.CreateBookmarkInput{
+			URL:   "https://example.org/concurrent",
+			Title: "Opaque concurrent item",
+		})
+		if err != nil {
+			t.Fatalf("create bookmark: %v", err)
+		}
+
+		doneCh := make(chan error, 1)
+		go func() {
+			_, berr := svc.Backfill(ctx, 10, tagging.LayerJev)
+			doneCh <- berr
+		}()
+
+		select {
+		case <-startedCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for first backfill to reach Jev stub")
+		}
+
+		if _, err := svc.Backfill(ctx, 10, tagging.LayerRules); !errors.Is(err, tagging.ErrBackfillRunning) {
+			t.Fatalf("expected ErrBackfillRunning on concurrent call, got %v", err)
+		}
+
+		stDuring, err := svc.Status(ctx)
+		if err != nil {
+			t.Fatalf("Status during: %v", err)
+		}
+		if !stDuring.LastBackfill.Running {
+			t.Fatal("expected LastBackfill.Running=true while first run is in flight")
+		}
+
+		close(releaseCh)
+		if err := <-doneCh; err != nil {
+			t.Fatalf("first backfill err: %v", err)
+		}
+
+		stAfter, err := svc.Status(ctx)
+		if err != nil {
+			t.Fatalf("Status after: %v", err)
+		}
+		if stAfter.LastBackfill.Running || stAfter.UntaggedCount != 0 {
+			t.Fatalf("expected Running=false and UntaggedCount=0 after completion, got %+v", stAfter)
 		}
 	})
 }

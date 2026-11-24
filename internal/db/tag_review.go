@@ -290,6 +290,22 @@ func (s *Store) CountPendingTagReviews(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// CountUntaggedBookmarks returns the number of bookmarks that have zero tags.
+func (s *Store) CountUntaggedBookmarks(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM bookmarks b
+		WHERE NOT EXISTS (
+			SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id
+		)
+	`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count untagged bookmarks: %w", err)
+	}
+	return count, nil
+}
+
 // ListUntaggedBookmarksForBackfill returns bookmarks with zero tags and no review queue row (pending, applied, or dismissed).
 func (s *Store) ListUntaggedBookmarksForBackfill(ctx context.Context, limit int) ([]Bookmark, error) {
 	if limit <= 0 {

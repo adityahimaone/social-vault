@@ -2,6 +2,8 @@ package tagging
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"slices"
 	"strings"
@@ -15,6 +17,15 @@ const (
 	DefaultBackfillLimit = 50
 	MaxBackfillLimit     = 500
 	maxShortJevErrorLen  = 160
+
+	LayerRules = "rules"
+	LayerJev   = "jev"
+)
+
+var (
+	ErrBackfillRunning = errors.New("Backfill sedang berjalan")
+	ErrInvalidLayer    = errors.New("invalid backfill layer")
+	ErrJevDisabled     = errors.New("Jev tidak aktif (JEV_API_KEY kosong)")
 )
 
 // BackfillResult summarizes one POST /api/tagging/backfill run.
@@ -58,6 +69,7 @@ type Status struct {
 	LastJevEvent  *JevEvent      `json:"last_jev_event"`
 	LastBackfill  BackfillStatus `json:"last_backfill"`
 	PendingReview int            `json:"pending_review"`
+	UntaggedCount int            `json:"untagged_count"`
 }
 
 // Service coordinates Layer 1 rules, Layer 2 Jev classification, and Layer 3 review queueing.
@@ -66,13 +78,12 @@ type Service struct {
 	jev   *JevClient
 	wg    sync.WaitGroup
 
-	mu               sync.Mutex
-	nextJobID        uint64
-	activeJobs       map[uint64]ActiveJevJob
-	jevSeq           uint64
-	lastJevEvent     *JevEvent
-	backfillInFlight int
-	lastBackfill     BackfillStatus
+	mu           sync.Mutex
+	nextJobID    uint64
+	activeJobs   map[uint64]ActiveJevJob
+	jevSeq       uint64
+	lastJevEvent *JevEvent
+	lastBackfill BackfillStatus
 }
 
 // NewService constructs a tagging Service. jev may be nil when JEV_API_KEY is unset.
@@ -136,12 +147,18 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 		return Status{}, err
 	}
 
+	untagged, err := s.store.CountUntaggedBookmarks(ctx)
+	if err != nil {
+		return Status{}, err
+	}
+
 	return Status{
 		JevEnabled:    s.JevEnabled(),
 		ActiveJevJobs: active,
 		LastJevEvent:  lastEvent,
 		LastBackfill:  lastBackfill,
 		PendingReview: pending,
+		UntaggedCount: untagged,
 	}, nil
 }
 
@@ -275,11 +292,39 @@ func (s *Service) runJevForBookmark(ctx context.Context, b *db.Bookmark) (applie
 	return appliedTags, queued, nil
 }
 
-// Backfill runs Layer 1 rules and (if configured) Layer 2 Jev over untagged bookmarks
-// that do not already have a review queue row (pending, applied, or dismissed).
-func (s *Service) Backfill(ctx context.Context, limit int) (out BackfillResult, err error) {
+func resolveBackfillLayers(layers []string, jevEnabled bool) (runRules, runJev bool, err error) {
+	if len(layers) == 0 {
+		return true, jevEnabled, nil
+	}
+	for _, raw := range layers {
+		switch raw {
+		case LayerRules:
+			runRules = true
+		case LayerJev:
+			runJev = true
+		default:
+			return false, false, fmt.Errorf("%w: %q (allowed: rules, jev)", ErrInvalidLayer, raw)
+		}
+	}
+	if runJev && !jevEnabled {
+		return false, false, ErrJevDisabled
+	}
+	return runRules, runJev, nil
+}
+
+// Backfill runs selected tagging layers ("rules", "jev", or both when omitted) over
+// untagged bookmarks that do not already have a review queue row (pending, applied, or dismissed).
+func (s *Service) Backfill(ctx context.Context, limit int, layers ...string) (out BackfillResult, err error) {
+	runRules, runJev, err := resolveBackfillLayers(layers, s.JevEnabled())
+	if err != nil {
+		return BackfillResult{}, err
+	}
+
 	s.mu.Lock()
-	s.backfillInFlight++
+	if s.lastBackfill.Running {
+		s.mu.Unlock()
+		return BackfillResult{}, ErrBackfillRunning
+	}
 	s.lastBackfill.Running = true
 	s.lastBackfill.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	s.lastBackfill.FinishedAt = ""
@@ -287,8 +332,7 @@ func (s *Service) Backfill(ctx context.Context, limit int) (out BackfillResult, 
 
 	defer func() {
 		s.mu.Lock()
-		s.backfillInFlight--
-		s.lastBackfill.Running = s.backfillInFlight > 0
+		s.lastBackfill.Running = false
 		s.lastBackfill.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		if err == nil {
 			resCopy := out
@@ -314,28 +358,30 @@ func (s *Service) Backfill(ctx context.Context, limit int) (out BackfillResult, 
 		out.Processed++
 
 		ruleMatched := false
-		ruleTags := s.MatchRules(Input{
-			URL:         b.URL,
-			Title:       b.Title,
-			Description: b.Description,
-			SiteName:    b.SiteName,
-		})
-		if len(ruleTags) > 0 {
-			merged := MergeTags(bookmarkTagNames(b), ruleTags)
-			updated, uerr := s.store.UpdateBookmark(ctx, b.ID, db.UpdateBookmarkInput{Tags: &merged})
-			if uerr != nil {
-				log.Printf("tagging: backfill rule update failed for bookmark %d: %v", b.ID, uerr)
-				out.Failed++
-				continue
+		if runRules {
+			ruleTags := s.MatchRules(Input{
+				URL:         b.URL,
+				Title:       b.Title,
+				Description: b.Description,
+				SiteName:    b.SiteName,
+			})
+			if len(ruleTags) > 0 {
+				merged := MergeTags(bookmarkTagNames(b), ruleTags)
+				updated, uerr := s.store.UpdateBookmark(ctx, b.ID, db.UpdateBookmarkInput{Tags: &merged})
+				if uerr != nil {
+					log.Printf("tagging: backfill rule update failed for bookmark %d: %v", b.ID, uerr)
+					out.Failed++
+					continue
+				}
+				b = updated
+				out.RulesTagged++
+				ruleMatched = true
 			}
-			b = updated
-			out.RulesTagged++
-			ruleMatched = true
 		}
 
 		jevApplied := 0
 		jevQueued := false
-		if s.JevEnabled() {
+		if runJev && s.JevEnabled() {
 			applied, queued, jerr := s.RunJevForBookmark(ctx, b)
 			if jerr != nil {
 				log.Printf("tagging: backfill jev failed for bookmark %d: %v", b.ID, jerr)
