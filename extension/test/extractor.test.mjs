@@ -172,6 +172,18 @@ test("detectPage matches supported X and Threads routes only", () => {
     label: "X Bookmarks",
     source: "extension-bulk-x"
   });
+  assert.deepEqual(extractor.detectPage("https://x.com/i/history"), {
+    platform: "x",
+    pageKind: "bookmarks",
+    label: "X Bookmarks",
+    source: "extension-bulk-x"
+  });
+  assert.deepEqual(extractor.detectPage("https://x.com/i/history/"), {
+    platform: "x",
+    pageKind: "bookmarks",
+    label: "X Bookmarks",
+    source: "extension-bulk-x"
+  });
   assert.deepEqual(extractor.detectPage("https://twitter.com/aditya_hima/likes/"), {
     platform: "x",
     pageKind: "likes",
@@ -185,6 +197,12 @@ test("detectPage matches supported X and Threads routes only", () => {
     source: "extension-bulk-threads"
   });
   assert.deepEqual(extractor.detectPage("https://threads.net/liked"), {
+    platform: "threads",
+    pageKind: "likes",
+    label: "Threads Likes",
+    source: "extension-bulk-threads"
+  });
+  assert.deepEqual(extractor.detectPage("https://www.threads.com/liked"), {
     platform: "threads",
     pageKind: "likes",
     label: "Threads Likes",

@@ -121,6 +121,18 @@
         };
       }
 
+      // /i/history itself renders the Bookmarks tab by default (the Likes
+      // tab is a link to /i/history/likes; Bookmarks is a tab control with
+      // no href). Without this the panel never mounts on the History page.
+      if (cleanPath === "/i/history") {
+        return {
+          platform: "x",
+          pageKind: "bookmarks",
+          label: "X Bookmarks",
+          source: "extension-bulk-x"
+        };
+      }
+
       if (cleanPath === "/i/history/bookmarks") {
         return {
           platform: "x",
