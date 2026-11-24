@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 264 64" width="264" height="64" fill="none">
+  <!-- Primary Mark (64x64) -->
+  <g>
+    <rect x="0" y="0" width="64" height="64" rx="16" fill="#F3F2ED" />
+    <rect x="4" y="4" width="56" height="56" rx="12" fill="#202929" />
+    <rect x="12" y="12" width="40" height="40" rx="4" fill="#F3F2ED" />
+    <rect x="12" y="28" width="4" height="8" fill="#202929" />
+    <rect x="48" y="28" width="4" height="8" fill="#202929" />
+    <path d="M24 4H40V44L32 36L24 44V4Z" fill="#557B79" />
+    <circle cx="32" cy="20" r="4" fill="#F3F2ED" />
+  </g>
+
+  <!-- System-font Lockup Wordmark -->
+  <text
+    x="80"
+    y="33"
+    fill="#202929"
+    font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif"
+    font-size="24"
+    font-weight="600"
+    letter-spacing="-0.4"
+  >Social Vault</text>
+  <text
+    x="81"
+    y="51"
+    fill="#557B79"
+    font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif"
+    font-size="11.5"
+    font-weight="600"
+    letter-spacing="1.4"
+  >REFERENCE LIBRARY</text>
+</svg>

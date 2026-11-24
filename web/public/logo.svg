@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none">
+  <!-- Outer Paper tile: ensures crisp perimeter separation on dark browser/OS chrome -->
+  <rect x="0" y="0" width="64" height="64" rx="16" fill="#F3F2ED" />
+
+  <!-- Graphite Ink Vault Door frame (concentric radius: 16 - 4 = 12) -->
+  <rect x="4" y="4" width="56" height="56" rx="12" fill="#202929" />
+
+  <!-- Inner Paper Vault Chamber (concentric radius: 12 - 8 = 4) -->
+  <rect x="12" y="12" width="40" height="40" rx="4" fill="#F3F2ED" />
+
+  <!-- Symmetrical Graphite Vault Locking Bolts -->
+  <rect x="12" y="28" width="4" height="8" fill="#202929" />
+  <rect x="48" y="28" width="4" height="8" fill="#202929" />
+
+  <!-- Sage Focus Bookmark Ribbon anchored through the top vault lintel with 45-deg V-notch -->
+  <path d="M24 4H40V44L32 36L24 44V4Z" fill="#557B79" />
+
+  <!-- Paper Vault Spindle / Keyhole Core inside the bookmark ribbon -->
+  <circle cx="32" cy="20" r="4" fill="#F3F2ED" />
+</svg>

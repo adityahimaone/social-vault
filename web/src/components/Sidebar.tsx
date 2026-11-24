@@ -107,8 +107,18 @@ export function Sidebar({
       >
         <div className="brand-header">
           <div className="brand-mark">
-            <span className="brand-badge" aria-hidden="true">
-              <BookmarkIcon size={15} />
+            <span
+              className="brand-badge"
+              aria-hidden="true"
+              style={{ background: "transparent", overflow: "hidden" }}
+            >
+              <img
+                src="/logo.svg"
+                alt=""
+                width={32}
+                height={32}
+                style={{ display: "block", width: "100%", height: "100%" }}
+              />
             </span>
             <div className="brand-copy">
               <span className="brand-name">Social Vault</span>
