@@ -67,7 +67,7 @@ export function GlassPopover({
       {trigger}
       {rendered && (
         <div
-          className={`glass-popover glass-rim glass-popover-${align}`}
+          className={`nav-popover nav-popover-${align}`}
           data-state={state}
           role="dialog"
           aria-label={label}

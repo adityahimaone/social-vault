@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowUpDown,
   Check,
+  LayoutDashboard,
   LayoutGrid,
   List as ListIcon,
   LogOut,
@@ -25,6 +26,7 @@ import type {
   ActiveView,
   ArchivedFilter,
   GridDensity,
+  GridStyle,
   LibrarySection,
   SmartFilter,
   SortMode,
@@ -53,6 +55,8 @@ interface DashboardToolbarProps {
   onToggleFullBleed: () => void;
   viewMode: "grid" | "list";
   onChangeViewMode: (mode: "grid" | "list") => void;
+  gridStyle: GridStyle;
+  onChangeGridStyle: (style: GridStyle) => void;
   archivedFilter: ArchivedFilter;
   onChangeArchivedFilter: (f: ArchivedFilter) => void;
   smartFilters: SmartFilter[];
@@ -71,6 +75,7 @@ interface DashboardToolbarProps {
 
 const SECTION_LABELS: Record<LibrarySection, string> = {
   all: "All References",
+  favorites: "Favourites",
   untagged: "Untagged",
   recent: "Recent (7d)",
   archived: "Archived",
@@ -88,6 +93,8 @@ const SORT_LABELS: { id: SortMode; label: string }[] = [
   { id: "oldest", label: "Oldest first" },
   { id: "title", label: "Title (A–Z)" },
 ];
+
+type LayoutChoice = "bento" | "uniform" | "list";
 
 export function DashboardToolbar({
   activeView,
@@ -110,6 +117,8 @@ export function DashboardToolbar({
   onToggleFullBleed,
   viewMode,
   onChangeViewMode,
+  gridStyle,
+  onChangeGridStyle,
   archivedFilter,
   onChangeArchivedFilter,
   smartFilters,
@@ -148,12 +157,23 @@ export function DashboardToolbar({
     (selectedTag ? 1 : 0) +
     (selectedList ? 1 : 0);
 
+  const layoutChoice: LayoutChoice = viewMode === "list" ? "list" : gridStyle;
+
+  function handleLayoutChange(next: LayoutChoice) {
+    if (next === "list") {
+      onChangeViewMode("list");
+    } else {
+      onChangeGridStyle(next);
+      onChangeViewMode("grid");
+    }
+  }
+
   return (
-    <header className="topbar glass-rim">
+    <header className="topbar">
       <div className="topbar-left">
         <button
           type="button"
-          className="btn btn-ghost btn-icon mobile-menu-btn"
+          className="btn btn-toolbar btn-icon mobile-menu-btn"
           onClick={onOpenMobileMenu}
           aria-label="Open navigation menu"
         >
@@ -162,19 +182,19 @@ export function DashboardToolbar({
 
         <button
           type="button"
-          className="btn btn-ghost btn-icon desktop-only-btn"
+          className="btn btn-toolbar btn-icon desktop-only-btn"
           onClick={onToggleSidebar}
           aria-label={sidebarCollapsed || fullBleed ? "Show sidebar" : "Hide sidebar"}
           title={sidebarCollapsed || fullBleed ? "Show sidebar ([)" : "Hide sidebar ([)"}
           aria-pressed={!sidebarCollapsed && !fullBleed}
         >
-          <PanelLeft size={17} aria-hidden="true" />
+          <PanelLeft size={16} aria-hidden="true" />
         </button>
 
         {activeView !== "bookmarks" && (
           <button
             type="button"
-            className="btn btn-glass btn-compact"
+            className="btn btn-toolbar btn-compact"
             onClick={() => onSelectView("bookmarks")}
           >
             <ArrowLeft size={14} aria-hidden="true" />
@@ -187,8 +207,8 @@ export function DashboardToolbar({
           {activeView === "bookmarks" && (
             <span className="items-counter-pill tabular-nums">
               {hasActiveFilters && visibleCount !== totalCount
-                ? `${visibleCount} of ${totalCount} items`
-                : `${visibleCount} ${visibleCount === 1 ? "item" : "items"}`}
+                ? `${visibleCount} of ${totalCount}`
+                : `${visibleCount}`}
             </span>
           )}
         </div>
@@ -197,7 +217,7 @@ export function DashboardToolbar({
       <div className={`toolbar-search-slot ${sidebarCollapsed || fullBleed ? "is-expanded" : ""}`}>
         {sidebarCollapsed || fullBleed ? (
           <div className="search-wrap">
-            <Search size={15} className="search-icon" aria-hidden="true" />
+            <Search size={14} className="search-icon" aria-hidden="true" />
             <label className="sr-only" htmlFor="toolbar-vault-search">
               Search bookmarks
             </label>
@@ -234,7 +254,7 @@ export function DashboardToolbar({
         ) : (
           <button
             type="button"
-            className="btn btn-glass btn-compact toolbar-search-trigger"
+            className="btn btn-toolbar btn-compact toolbar-search-trigger"
             onClick={onFocusSearch}
             title="Focus search (/)"
           >
@@ -255,7 +275,7 @@ export function DashboardToolbar({
           trigger={
             <button
               type="button"
-              className={`btn btn-glass btn-compact ${activeFilterCount > 0 ? "is-active-nav" : ""}`}
+              className={`btn btn-toolbar btn-compact ${activeFilterCount > 0 ? "is-active-nav" : ""}`}
               onClick={() => {
                 setSortOpen(false);
                 setSettingsOpen(false);
@@ -334,7 +354,7 @@ export function DashboardToolbar({
           trigger={
             <button
               type="button"
-              className="btn btn-glass btn-compact"
+              className="btn btn-toolbar btn-compact"
               onClick={() => {
                 setFilterOpen(false);
                 setSettingsOpen(false);
@@ -372,20 +392,25 @@ export function DashboardToolbar({
           </div>
         </GlassPopover>
 
-        <GlassSegmented
+        <GlassSegmented<LayoutChoice>
           ariaLabel="Bookmark layout mode"
           size="sm"
-          value={viewMode}
-          onChange={onChangeViewMode}
+          value={layoutChoice}
+          onChange={handleLayoutChange}
           options={[
             {
-              value: "grid",
-              label: <LayoutGrid size={15} aria-hidden="true" />,
-              ariaLabel: "Masonry grid view",
+              value: "bento",
+              label: <LayoutDashboard size={14} aria-hidden="true" />,
+              ariaLabel: "Bento masonry grid",
+            },
+            {
+              value: "uniform",
+              label: <LayoutGrid size={14} aria-hidden="true" />,
+              ariaLabel: "Uniform grid",
             },
             {
               value: "list",
-              label: <ListIcon size={15} aria-hidden="true" />,
+              label: <ListIcon size={14} aria-hidden="true" />,
               ariaLabel: "List view",
             },
           ]}
@@ -393,7 +418,7 @@ export function DashboardToolbar({
 
         <button
           type="button"
-          className={`btn btn-glass btn-compact ${activeView === "import" ? "is-active-nav" : ""}`}
+          className={`btn btn-toolbar btn-compact ${activeView === "import" ? "is-active-nav" : ""}`}
           aria-current={activeView === "import" ? "page" : undefined}
           onClick={() => onSelectView(activeView === "import" ? "bookmarks" : "import")}
           title="Import bookmarks"
@@ -404,24 +429,24 @@ export function DashboardToolbar({
 
         <button
           type="button"
-          className={`btn btn-glass btn-icon btn-icon-sm desktop-only-btn ${fullBleed ? "is-active-nav" : ""}`}
+          className={`btn btn-toolbar btn-icon btn-icon-sm desktop-only-btn ${fullBleed ? "is-active-nav" : ""}`}
           onClick={onToggleFullBleed}
           aria-pressed={fullBleed}
           aria-label={fullBleed ? "Exit full-bleed grid" : "Full-bleed grid"}
           title={fullBleed ? "Exit full-bleed (F)" : "Full-bleed grid (F)"}
         >
-          {fullBleed ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
+          {fullBleed ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
         </button>
 
         <button
           type="button"
-          className={`btn btn-glass btn-icon btn-icon-sm desktop-only-btn ${inspectorOpen && !fullBleed ? "is-active-nav" : ""}`}
+          className={`btn btn-toolbar btn-icon btn-icon-sm desktop-only-btn ${inspectorOpen && !fullBleed ? "is-active-nav" : ""}`}
           onClick={onToggleInspector}
           aria-pressed={inspectorOpen && !fullBleed}
           aria-label={inspectorOpen ? "Hide info panel" : "Show info panel"}
           title={inspectorOpen ? "Hide Info panel (I)" : "Show Info panel (I)"}
         >
-          <PanelRight size={15} aria-hidden="true" />
+          <PanelRight size={14} aria-hidden="true" />
         </button>
 
         <GlassPopover
@@ -431,7 +456,7 @@ export function DashboardToolbar({
           trigger={
             <button
               type="button"
-              className="btn btn-glass btn-icon btn-icon-sm"
+              className="btn btn-toolbar btn-icon btn-icon-sm"
               onClick={() => {
                 setFilterOpen(false);
                 setSortOpen(false);
@@ -441,20 +466,20 @@ export function DashboardToolbar({
               aria-label="Settings"
               title="Settings"
             >
-              <Settings size={15} aria-hidden="true" />
+              <Settings size={14} aria-hidden="true" />
             </button>
           }
         >
           <div className="popover-section">
             <div className="popover-title">Appearance</div>
             <button type="button" className="popover-row" onClick={onToggleTheme}>
-              <span>{theme === "dark" ? "Switch to Light glass" : "Switch to Dark glass"}</span>
+              <span>{theme === "dark" ? "Switch to Paper appearance" : "Switch to Dark appearance"}</span>
               {theme === "dark" ? <Sun size={14} aria-hidden="true" /> : <Moon size={14} aria-hidden="true" />}
             </button>
           </div>
 
           <div className="popover-section">
-            <div className="popover-title">Masonry density</div>
+            <div className="popover-title">Grid density</div>
             <div className="popover-chip-row">
               {(["comfortable", "compact"] as GridDensity[]).map((d) => (
                 <button
@@ -474,6 +499,7 @@ export function DashboardToolbar({
             <div className="popover-shortcuts">
               <div><kbd>/</kbd> Search</div>
               <div><kbd>N</kbd> Save URL</div>
+              <div><kbd>Space</kbd> Quick look</div>
               <div><kbd>F</kbd> Full-bleed</div>
               <div><kbd>I</kbd> Info panel</div>
               <div><kbd>[</kbd> Sidebar</div>
@@ -490,7 +516,7 @@ export function DashboardToolbar({
         </GlassPopover>
 
         <button type="button" className="btn btn-primary btn-compact-cta" onClick={onOpenAdd}>
-          <Plus size={16} aria-hidden="true" />
+          <Plus size={15} aria-hidden="true" />
           <span>Save URL</span>
           <span className="btn-kbd" aria-hidden="true">
             N

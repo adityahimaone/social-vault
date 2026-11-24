@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Eye, EyeOff, Lock, Moon, Sun } from "lucide-react";
 import { api, ApiError } from "../api";
-import { AmbientBackdrop } from "./glass/AmbientBackdrop";
 
 interface LoginViewProps {
   passwordConfigured: boolean;
@@ -40,13 +39,11 @@ export function LoginView({ passwordConfigured, theme, onToggleTheme, onSuccess 
 
   return (
     <main className="login-page">
-      <AmbientBackdrop />
-
-      <section className="login-card glass-rim" aria-labelledby="login-heading">
+      <section className="login-card" aria-labelledby="login-heading">
         <div className="login-header">
           <div className="brand-mark">
             <span className="brand-badge" aria-hidden="true">
-              <Lock size={16} />
+              <Lock size={15} />
             </span>
             <div className="brand-copy">
               <span className="brand-name">Social Vault</span>
@@ -55,11 +52,11 @@ export function LoginView({ passwordConfigured, theme, onToggleTheme, onSuccess 
           </div>
           <button
             type="button"
-            className="btn btn-glass btn-icon"
+            className="btn btn-secondary btn-icon"
             onClick={onToggleTheme}
-            aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            aria-label={theme === "dark" ? "Switch to Paper appearance" : "Switch to Dark appearance"}
           >
-            {theme === "dark" ? <Sun size={17} aria-hidden="true" /> : <Moon size={17} aria-hidden="true" />}
+            {theme === "dark" ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}
           </button>
         </div>
 

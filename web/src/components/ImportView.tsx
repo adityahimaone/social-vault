@@ -44,7 +44,7 @@ export function ImportView({ onImported, onNotify }: ImportViewProps) {
   }
 
   return (
-    <section className="glass-panel glass-rim" aria-labelledby="import-heading">
+    <section className="content-panel" aria-labelledby="import-heading">
       <div className="panel-header">
         <div>
           <h1 id="import-heading" className="panel-title">

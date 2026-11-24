@@ -12,6 +12,7 @@ import {
   Moon,
   Search,
   Sparkles,
+  Star,
   Sun,
   Tag as TagIcon,
   Upload,
@@ -40,6 +41,7 @@ interface SidebarProps {
   lists: List[];
   counts: {
     all: number;
+    favorites: number;
     untagged: number;
     recent: number;
     archived: number;
@@ -100,13 +102,13 @@ export function Sidebar({
         aria-hidden="true"
       />
       <aside
-        className={`sidebar glass-rim ${open ? "is-open" : ""} ${collapsed ? "is-collapsed" : ""}`}
+        className={`sidebar ${open ? "is-open" : ""} ${collapsed ? "is-collapsed" : ""}`}
         aria-label="Vault navigation"
       >
         <div className="brand-header">
           <div className="brand-mark">
             <span className="brand-badge" aria-hidden="true">
-              <BookmarkIcon size={16} />
+              <BookmarkIcon size={15} />
             </span>
             <div className="brand-copy">
               <span className="brand-name">Social Vault</span>
@@ -124,7 +126,7 @@ export function Sidebar({
         </div>
 
         <div className="sidebar-search-wrap">
-          <Search size={15} className="search-icon" aria-hidden="true" />
+          <Search size={14} className="search-icon" aria-hidden="true" />
           <label className="sr-only" htmlFor="sidebar-vault-search">
             Search bookmarks
           </label>
@@ -176,7 +178,20 @@ export function Sidebar({
               <BookmarkIcon size={15} aria-hidden="true" />
               <span className="nav-item-label">All</span>
             </span>
-            <span className="nav-item-count">{counts.all}</span>
+            <span className="nav-item-count tabular-nums">{counts.all}</span>
+          </button>
+
+          <button
+            type="button"
+            className="nav-item"
+            aria-current={isLibraryActive && librarySection === "favorites" ? "page" : undefined}
+            onClick={() => pickSection("favorites")}
+          >
+            <span className="nav-item-main">
+              <Star size={15} aria-hidden="true" />
+              <span className="nav-item-label">Favourites</span>
+            </span>
+            <span className="nav-item-count tabular-nums">{counts.favorites}</span>
           </button>
 
           <button
@@ -189,7 +204,7 @@ export function Sidebar({
               <TagIcon size={15} aria-hidden="true" />
               <span className="nav-item-label">Untagged</span>
             </span>
-            <span className="nav-item-count">{counts.untagged}</span>
+            <span className="nav-item-count tabular-nums">{counts.untagged}</span>
           </button>
 
           <button
@@ -202,7 +217,7 @@ export function Sidebar({
               <Sparkles size={15} aria-hidden="true" />
               <span className="nav-item-label">Recent</span>
             </span>
-            <span className="nav-item-count">{counts.recent}</span>
+            <span className="nav-item-count tabular-nums">{counts.recent}</span>
           </button>
 
           <button
@@ -215,7 +230,7 @@ export function Sidebar({
               <Archive size={15} aria-hidden="true" />
               <span className="nav-item-label">Archived</span>
             </span>
-            <span className="nav-item-count">{counts.archived}</span>
+            <span className="nav-item-count tabular-nums">{counts.archived}</span>
           </button>
         </nav>
 
@@ -275,7 +290,7 @@ export function Sidebar({
                     <FolderKanban size={15} aria-hidden="true" />
                     <span className="nav-item-label">{list.name}</span>
                   </span>
-                  <span className="nav-item-count">{list.count ?? 0}</span>
+                  <span className="nav-item-count tabular-nums">{list.count ?? 0}</span>
                 </button>
               );
             })
@@ -320,7 +335,7 @@ export function Sidebar({
                     <Hash size={15} aria-hidden="true" />
                     <span className="nav-item-label">{tag.name}</span>
                   </span>
-                  <span className="nav-item-count">{tag.count ?? 0}</span>
+                  <span className="nav-item-count tabular-nums">{tag.count ?? 0}</span>
                 </button>
               );
             })
@@ -349,7 +364,9 @@ export function Sidebar({
           <button type="button" className="nav-item" onClick={onToggleTheme}>
             <span className="nav-item-main">
               {theme === "dark" ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
-              <span className="nav-item-label">{theme === "dark" ? "Light glass" : "Dark glass"}</span>
+              <span className="nav-item-label">
+                {theme === "dark" ? "Paper appearance" : "Dark appearance"}
+              </span>
             </span>
           </button>
           <button type="button" className="nav-item" onClick={onLogout}>

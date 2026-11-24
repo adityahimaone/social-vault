@@ -7,13 +7,14 @@ const STOPWORDS = new Set([
   "http", "https", "www", "com", "org", "net", "post", "status", "thread",
 ]);
 
+/* Muted stone / paper / salt neutral tones — colour comes from thumbnails, not chrome */
 const DOMAIN_PALETTE = [
-  { hue: 199, accent: "rgba(56, 189, 248, 0.24)" },
-  { hue: 221, accent: "rgba(99, 102, 241, 0.24)" },
-  { hue: 172, accent: "rgba(20, 184, 166, 0.22)" },
-  { hue: 158, accent: "rgba(16, 185, 129, 0.22)" },
-  { hue: 256, accent: "rgba(139, 92, 246, 0.22)" },
-  { hue: 210, accent: "rgba(100, 116, 139, 0.24)" },
+  { hue: 176, accent: "#E4EFEB" },
+  { hue: 48, accent: "#ECEAE2" },
+  { hue: 194, accent: "#E6ECEE" },
+  { hue: 150, accent: "#E7EEEB" },
+  { hue: 38, accent: "#EFECE4" },
+  { hue: 200, accent: "#E8ECEE" },
 ];
 
 export function domainFromURL(raw: string): string {
@@ -84,17 +85,39 @@ export function buildSimilarQuery(bookmark: Bookmark): string {
   return site && site.length >= 2 ? site : "";
 }
 
+export function buildSparklineSeries(bookmarks: Bookmark[], days = 14): number[] {
+  const counts = Array.from({ length: days }, () => 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+
+  for (const item of bookmarks) {
+    const parsed = Date.parse(item.created_at);
+    if (Number.isNaN(parsed)) continue;
+    const d = new Date(parsed);
+    d.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((todayMs - d.getTime()) / dayMs);
+    if (diffDays >= 0 && diffDays < days) {
+      counts[days - 1 - diffDays] += 1;
+    }
+  }
+  return counts;
+}
+
 export function filterAndSortBookmarks(
   items: Bookmark[],
   opts: {
     librarySection: LibrarySection;
     smartFilters: SmartFilter[];
     sortMode: SortMode;
+    favoriteIds?: Set<number>;
   }
 ): Bookmark[] {
-  const { librarySection, smartFilters, sortMode } = opts;
+  const { librarySection, smartFilters, sortMode, favoriteIds } = opts;
 
   const filtered = items.filter((item) => {
+    if (librarySection === "favorites" && !(favoriteIds?.has(item.id) ?? false)) return false;
     if (librarySection === "untagged" && item.tags.length > 0) return false;
     if (librarySection === "recent" && !isWithinDays(item.created_at, 7)) return false;
     if (librarySection === "archived" && !item.archived) return false;

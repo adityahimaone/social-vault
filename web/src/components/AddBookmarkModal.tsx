@@ -128,7 +128,7 @@ export function AddBookmarkModal({
     >
       <div
         ref={panelRef}
-        className="modal-panel glass-rim"
+        className="modal-panel"
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-bookmark-heading"

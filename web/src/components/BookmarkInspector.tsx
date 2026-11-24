@@ -5,29 +5,35 @@ import {
   Check,
   Copy,
   ExternalLink,
+  Eye,
   FolderKanban,
+  Globe,
   Hash,
-  Image as ImageIcon,
   Layers,
   Sparkles,
+  Star,
   Trash2,
   X,
 } from "lucide-react";
 import { api, ApiError } from "../api";
 import type { Bookmark, List, Stats } from "../types";
-import { buildSimilarQuery, domainFromURL, formatDateTime, getDomainTone } from "../utils/bookmarks";
+import { buildSimilarQuery, domainFromURL, formatDateTime } from "../utils/bookmarks";
 import { useFocusTrap } from "./glass/useFocusTrap";
 
 interface BookmarkInspectorProps {
   bookmark: Bookmark | null;
   open: boolean;
   isMobileViewport: boolean;
+  isFavorite: boolean;
   allLists: List[];
   stats: Stats | null;
   withThumbnailCount: number;
   onClose: () => void;
   onSelectBookmark: (bookmark: Bookmark) => void;
   onSelectTagFilter: (tagName: string) => void;
+  onToggleFavorite: (bookmark: Bookmark) => void;
+  onToggleArchive: (bookmark: Bookmark) => Promise<void>;
+  onQuickLook: (bookmark: Bookmark) => void;
   onUpdated: (bookmark: Bookmark) => void;
   onDeleted: (id: number) => void;
   onNotify: (msg: string, tone: "success" | "error") => void;
@@ -36,7 +42,6 @@ interface BookmarkInspectorProps {
 function SimilarThumb({ item }: { item: Bookmark }) {
   const [failed, setFailed] = useState(false);
   const domain = item.site_name || domainFromURL(item.url);
-  const tone = getDomainTone(domain);
 
   useEffect(() => {
     setFailed(false);
@@ -56,11 +61,8 @@ function SimilarThumb({ item }: { item: Bookmark }) {
   }
 
   return (
-    <div
-      className="similar-thumb similar-thumb-fallback"
-      style={{ "--card-hue": tone.hue, "--card-tint": tone.accent } as React.CSSProperties}
-    >
-      <span aria-hidden="true">{tone.initial}</span>
+    <div className="similar-thumb similar-thumb-fallback" aria-hidden="true">
+      <Globe size={14} />
     </div>
   );
 }
@@ -69,12 +71,16 @@ export function BookmarkInspector({
   bookmark,
   open,
   isMobileViewport,
+  isFavorite,
   allLists,
   stats,
   withThumbnailCount,
   onClose,
   onSelectBookmark,
   onSelectTagFilter,
+  onToggleFavorite,
+  onToggleArchive,
+  onQuickLook,
   onUpdated,
   onDeleted,
   onNotify,
@@ -229,17 +235,11 @@ export function BookmarkInspector({
     }
   }
 
-  async function handleToggleArchive() {
+  async function handleArchiveClick() {
     if (!bookmark) return;
     setSaving(true);
     try {
-      const updated = await api.updateBookmark(bookmark.id, {
-        archived: !bookmark.archived,
-      });
-      onUpdated(updated);
-      onNotify(updated.archived ? "Bookmark archived" : "Bookmark restored", "success");
-    } catch (err) {
-      onNotify(err instanceof ApiError ? err.message : "Failed to update archive state", "error");
+      await onToggleArchive(bookmark);
     } finally {
       setSaving(false);
     }
@@ -274,7 +274,6 @@ export function BookmarkInspector({
 
   const active = bookmark;
   const domain = active ? active.site_name || domainFromURL(active.url) : "";
-  const tone = getDomainTone(domain);
 
   const isDirty = active
     ? title !== active.title ||
@@ -292,7 +291,7 @@ export function BookmarkInspector({
   const panelContent = (
     <aside
       ref={panelRef}
-      className={`inspector-panel glass-rim ${useModalDrawer ? "is-drawer" : ""}`}
+      className={`inspector-panel ${useModalDrawer ? "is-drawer" : ""}`.trim()}
       aria-label={active ? "Bookmark info inspector" : "Vault overview"}
       role={useModalDrawer ? "dialog" : "complementary"}
       aria-modal={useModalDrawer ? "true" : undefined}
@@ -305,16 +304,37 @@ export function BookmarkInspector({
 
         <div className="drawer-header-actions">
           {active && (
-            <a
-              href={active.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-ghost btn-icon btn-icon-sm"
-              aria-label="Open URL in new tab"
-              title="Open URL"
-            >
-              <ExternalLink size={15} aria-hidden="true" />
-            </a>
+            <>
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon btn-icon-sm"
+                onClick={() => onQuickLook(active)}
+                aria-label="Quick Look"
+                title="Quick Look (Space)"
+              >
+                <Eye size={15} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={`btn btn-ghost btn-icon btn-icon-sm ${isFavorite ? "is-fav" : ""}`}
+                onClick={() => onToggleFavorite(active)}
+                aria-label={isFavorite ? "Remove from favourites" : "Add to favourites"}
+                aria-pressed={isFavorite}
+                title={isFavorite ? "Unfavourite" : "Favourite"}
+              >
+                <Star size={15} aria-hidden="true" fill={isFavorite ? "currentColor" : "none"} />
+              </button>
+              <a
+                href={active.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-ghost btn-icon btn-icon-sm"
+                aria-label="Open URL in new tab"
+                title="Open URL"
+              >
+                <ExternalLink size={15} aria-hidden="true" />
+              </a>
+            </>
           )}
           <button
             type="button"
@@ -330,10 +350,10 @@ export function BookmarkInspector({
 
       {!active ? (
         <div className="inspector-body inspector-empty-overview">
-          <div className="overview-hero glass-rim">
+          <div className="overview-hero">
             <div className="overview-hero-top">
               <span className="stat-icon-well" aria-hidden="true">
-                <Layers size={15} />
+                <Layers size={14} />
               </span>
               <span className="overview-label">Library Snapshot</span>
             </div>
@@ -349,11 +369,11 @@ export function BookmarkInspector({
           </div>
 
           <div className="inspector-hint-box">
-            <Sparkles size={16} aria-hidden="true" />
+            <Sparkles size={15} aria-hidden="true" />
             <div>
               <div className="inspector-hint-title">Select any reference</div>
               <p className="inspector-hint-copy">
-                Click a card in the masonry grid or press <kbd>J</kbd>/<kbd>K</kbd> to inspect metadata, edit notes &amp; tags, and discover similar links.
+                Click a card or press <kbd>J</kbd>/<kbd>K</kbd> to inspect metadata, edit notes &amp; tags, and press <kbd>Space</kbd> for Quick Look.
               </p>
             </div>
           </div>
@@ -381,7 +401,7 @@ export function BookmarkInspector({
       ) : (
         <>
           <div className="inspector-body">
-            {active.image_url && !previewFailed ? (
+            {active.image_url && !previewFailed && (
               <div className="inspector-preview">
                 <img
                   src={active.image_url}
@@ -394,19 +414,6 @@ export function BookmarkInspector({
                   }}
                   onError={() => setPreviewFailed(true)}
                 />
-              </div>
-            ) : (
-              <div
-                className="inspector-preview-fallback"
-                style={{ "--card-hue": tone.hue, "--card-tint": tone.accent } as React.CSSProperties}
-              >
-                <span className="masonry-fallback-monogram" aria-hidden="true">
-                  {tone.initial}
-                </span>
-                <span className="inspector-fallback-label">
-                  <ImageIcon size={14} aria-hidden="true" />
-                  <span>No thumbnail preview</span>
-                </span>
               </div>
             )}
 
@@ -564,7 +571,7 @@ export function BookmarkInspector({
                     <button
                       key={sim.id}
                       type="button"
-                      className="similar-card glass-rim"
+                      className="similar-card"
                       onClick={() => onSelectBookmark(sim)}
                     >
                       <SimilarThumb item={sim} />
@@ -590,7 +597,7 @@ export function BookmarkInspector({
               <button
                 type="button"
                 className="btn btn-secondary btn-compact"
-                onClick={handleToggleArchive}
+                onClick={handleArchiveClick}
                 disabled={saving}
               >
                 {active.archived ? (

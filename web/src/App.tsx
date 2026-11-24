@@ -5,10 +5,10 @@ import { AddBookmarkModal } from "./components/AddBookmarkModal";
 import { BookmarkInspector } from "./components/BookmarkInspector";
 import { BookmarkList } from "./components/BookmarkList";
 import { DashboardToolbar } from "./components/DashboardToolbar";
-import { AmbientBackdrop } from "./components/glass/AmbientBackdrop";
 import { ImportView } from "./components/ImportView";
 import { ListsView } from "./components/ListsView";
 import { LoginView } from "./components/LoginView";
+import { QuickLookModal } from "./components/QuickLookModal";
 import { Sidebar } from "./components/Sidebar";
 import { StatsBar } from "./components/StatsBar";
 import { TagsView } from "./components/TagsView";
@@ -18,6 +18,7 @@ import type {
   ArchivedFilter,
   Bookmark,
   GridDensity,
+  GridStyle,
   LibrarySection,
   List,
   SmartFilter,
@@ -47,16 +48,31 @@ function writeStorage(key: string, val: string) {
   }
 }
 
-function getInitialTheme(): "dark" | "light" {
-  const saved = readStorage("sv_theme", ["dark", "light"] as const, "dark");
-  if (saved === "light" || saved === "dark") {
-    try {
-      if (localStorage.getItem("sv_theme")) return saved;
-    } catch {
-      // ignore
+function readFavoriteIds(): Set<number> {
+  try {
+    const raw = localStorage.getItem("sv_favorites");
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return new Set(parsed.filter((n): n is number => typeof n === "number" && Number.isFinite(n)));
     }
+  } catch {
+    // ignore storage restriction
   }
-  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  return new Set();
+}
+
+function writeFavoriteIds(ids: Set<number>) {
+  writeStorage("sv_favorites", JSON.stringify(Array.from(ids)));
+}
+
+function getInitialTheme(): "dark" | "light" {
+  try {
+    if (localStorage.getItem("sv_theme") === "dark") return "dark";
+  } catch {
+    // ignore
+  }
+  return "light";
 }
 
 function useIsMobileInspector(): boolean {
@@ -79,6 +95,9 @@ export function App() {
   const [theme, setTheme] = useState<"dark" | "light">(getInitialTheme);
   const [viewMode, setViewMode] = useState<"grid" | "list">(() =>
     readStorage("sv_view_mode", ["grid", "list"] as const, "grid")
+  );
+  const [gridStyle, setGridStyle] = useState<GridStyle>(() =>
+    readStorage("sv_grid_style", ["bento", "uniform"] as const, "bento")
   );
   const [sortMode, setSortMode] = useState<SortMode>(() =>
     readStorage("sv_sort_mode", ["newest", "oldest", "title"] as const, "newest")
@@ -119,7 +138,9 @@ export function App() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [lists, setLists] = useState<List[]>([]);
 
+  const [favoriteIds, setFavoriteIds] = useState<Set<number>>(readFavoriteIds);
   const [selectedBookmark, setSelectedBookmark] = useState<Bookmark | null>(null);
+  const [quickLookBookmark, setQuickLookBookmark] = useState<Bookmark | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [addModalInstant, setAddModalInstant] = useState(false);
 
@@ -136,6 +157,7 @@ export function App() {
   }, [theme]);
 
   useEffect(() => writeStorage("sv_view_mode", viewMode), [viewMode]);
+  useEffect(() => writeStorage("sv_grid_style", gridStyle), [gridStyle]);
   useEffect(() => writeStorage("sv_sort_mode", sortMode), [sortMode]);
   useEffect(() => writeStorage("sv_density", density), [density]);
   useEffect(
@@ -143,18 +165,30 @@ export function App() {
     [sidebarCollapsed]
   );
   useEffect(() => writeStorage("sv_inspector_open", String(inspectorOpen)), [inspectorOpen]);
+  useEffect(() => writeFavoriteIds(favoriteIds), [favoriteIds]);
 
-  const notify = useCallback((message: string, tone: "success" | "error" | "info" = "info") => {
-    const id = toastIDRef.current++;
-    setToasts((prev) => [...prev.slice(-3), { id, message, tone }]);
-  }, []);
+  const notify = useCallback(
+    (
+      message: string,
+      tone: "success" | "error" | "info" = "info",
+      action?: { label: string; onClick: () => void }
+    ) => {
+      const id = toastIDRef.current++;
+      setToasts((prev) => [...prev.slice(-3), { id, message, tone, action }]);
+    },
+    []
+  );
 
   useEffect(() => {
     if (toasts.length === 0 || toastPaused) return;
-    const timer = window.setTimeout(() => {
-      if (document.hidden) return;
-      setToasts((prev) => prev.slice(1));
-    }, 3400);
+    const hasAction = Boolean(toasts[0]?.action);
+    const timer = window.setTimeout(
+      () => {
+        if (document.hidden) return;
+        setToasts((prev) => prev.slice(1));
+      },
+      hasAction ? 4800 : 3400
+    );
     return () => window.clearTimeout(timer);
   }, [toasts, toastPaused]);
 
@@ -269,27 +303,31 @@ export function App() {
         librarySection,
         smartFilters,
         sortMode,
+        favoriteIds,
       }),
-    [bookmarks, librarySection, smartFilters, sortMode]
+    [bookmarks, librarySection, smartFilters, sortMode, favoriteIds]
   );
 
   const libraryCounts = useMemo(() => {
     let untagged = 0;
     let recent = 0;
     let withThumb = 0;
+    let favorites = 0;
     for (const b of bookmarks) {
       if (b.tags.length === 0) untagged++;
       if (isWithinDays(b.created_at, 7)) recent++;
       if (b.image_url) withThumb++;
+      if (favoriteIds.has(b.id)) favorites++;
     }
     return {
       all: stats?.total ?? totalBookmarks,
+      favorites,
       untagged,
       recent,
       archived: stats?.archived ?? 0,
       withThumb,
     };
-  }, [bookmarks, stats, totalBookmarks]);
+  }, [bookmarks, stats, totalBookmarks, favoriteIds]);
 
   const focusSearchInput = useCallback(() => {
     setActiveView("bookmarks");
@@ -311,7 +349,7 @@ export function App() {
         target?.tagName === "TEXTAREA" ||
         target?.tagName === "SELECT" ||
         target?.isContentEditable;
-      if (isInput || addModalOpen) return;
+      if (isInput || addModalOpen || quickLookBookmark) return;
 
       if (e.key === "/") {
         e.preventDefault();
@@ -320,6 +358,15 @@ export function App() {
         e.preventDefault();
         setAddModalInstant(true);
         setAddModalOpen(true);
+      } else if (e.key === " ") {
+        if (
+          target?.tagName !== "BUTTON" &&
+          target?.tagName !== "A" &&
+          selectedBookmark
+        ) {
+          e.preventDefault();
+          setQuickLookBookmark(selectedBookmark);
+        }
       } else if (e.key === "f") {
         e.preventDefault();
         setFullBleed((v) => !v);
@@ -352,6 +399,7 @@ export function App() {
   }, [
     authState.authenticated,
     addModalOpen,
+    quickLookBookmark,
     fullBleed,
     activeView,
     visibleBookmarks,
@@ -379,21 +427,64 @@ export function App() {
     await api.logout();
     setAuthState((prev) => ({ ...prev, authenticated: false }));
     setSelectedBookmark(null);
+    setQuickLookBookmark(null);
   }
 
-  async function handleToggleArchive(item: Bookmark) {
-    try {
-      const updated = await api.updateBookmark(item.id, { archived: !item.archived });
+  const applyArchiveState = useCallback(
+    async (id: number, archived: boolean) => {
+      const updated = await api.updateBookmark(id, { archived });
       setBookmarks((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
-      if (selectedBookmark?.id === updated.id) {
-        setSelectedBookmark(updated);
-      }
+      setSelectedBookmark((prev) => (prev?.id === updated.id ? updated : prev));
+      setQuickLookBookmark((prev) => (prev?.id === updated.id ? updated : prev));
       await refreshMetadata();
-      notify(updated.archived ? "Archived" : "Restored", "success");
-    } catch (err) {
-      notify(err instanceof ApiError ? err.message : "Failed to update bookmark", "error");
-    }
-  }
+      return updated;
+    },
+    [refreshMetadata]
+  );
+
+  const handleToggleArchive = useCallback(
+    async (item: Bookmark) => {
+      const previousArchived = item.archived;
+      try {
+        const updated = await applyArchiveState(item.id, !previousArchived);
+        notify(updated.archived ? "Archived" : "Restored", "success", {
+          label: "Undo",
+          onClick: () => {
+            void applyArchiveState(item.id, previousArchived).catch((err) => {
+              notify(err instanceof ApiError ? err.message : "Failed to undo", "error");
+            });
+          },
+        });
+      } catch (err) {
+        notify(err instanceof ApiError ? err.message : "Failed to update bookmark", "error");
+      }
+    },
+    [applyArchiveState, notify]
+  );
+
+  const handleToggleFavorite = useCallback(
+    (item: Bookmark) => {
+      const wasFavorite = favoriteIds.has(item.id);
+      setFavoriteIds((prev) => {
+        const next = new Set(prev);
+        if (wasFavorite) next.delete(item.id);
+        else next.add(item.id);
+        return next;
+      });
+      notify(wasFavorite ? "Removed from favourites" : "Added to favourites", "success", {
+        label: "Undo",
+        onClick: () => {
+          setFavoriteIds((prev) => {
+            const next = new Set(prev);
+            if (wasFavorite) next.add(item.id);
+            else next.delete(item.id);
+            return next;
+          });
+        },
+      });
+    },
+    [favoriteIds, notify]
+  );
 
   function clearFilters() {
     setSearchInput("");
@@ -408,8 +499,7 @@ export function App() {
   if (authState.loading) {
     return (
       <main className="login-page">
-        <AmbientBackdrop />
-        <div className="loading-pill glass-rim">
+        <div className="loading-pill">
           <span className="loading-dot" aria-hidden="true" />
           <span>Loading Social Vault...</span>
         </div>
@@ -455,8 +545,6 @@ export function App() {
       <a className="skip-link" href="#vault-main">
         Skip to bookmarks
       </a>
-
-      <AmbientBackdrop />
 
       <Sidebar
         open={mobileMenuOpen}
@@ -519,6 +607,8 @@ export function App() {
           onToggleFullBleed={() => setFullBleed((v) => !v)}
           viewMode={viewMode}
           onChangeViewMode={setViewMode}
+          gridStyle={gridStyle}
+          onChangeGridStyle={setGridStyle}
           archivedFilter={archivedFilter}
           onChangeArchivedFilter={(f) => {
             setArchivedFilter(f);
@@ -549,6 +639,7 @@ export function App() {
               {!fullBleed && (
                 <StatsBar
                   stats={stats}
+                  bookmarks={bookmarks}
                   activeArchivedFilter={archivedFilter}
                   selectedTag={selectedTag}
                   onSelectArchived={(f) => {
@@ -636,8 +727,10 @@ export function App() {
                 totalAvailable={totalBookmarks}
                 loading={loadingBookmarks}
                 viewMode={viewMode}
+                gridStyle={gridStyle}
                 density={density}
                 selectedId={selectedBookmark?.id ?? null}
+                favoriteIds={favoriteIds}
                 hasActiveFilters={hasActiveFilters}
                 hasMore={bookmarks.length < totalBookmarks}
                 loadingMore={loadingMore}
@@ -647,6 +740,8 @@ export function App() {
                     setInspectorOpen(true);
                   }
                 }}
+                onQuickLook={(b) => setQuickLookBookmark(b)}
+                onToggleFavorite={handleToggleFavorite}
                 onToggleArchive={handleToggleArchive}
                 onSelectTag={(name) => setSelectedTag(name)}
                 onSelectList={(name) => setSelectedList(name)}
@@ -700,6 +795,7 @@ export function App() {
         bookmark={selectedBookmark}
         open={effectiveInspectorOpen}
         isMobileViewport={isMobileInspector}
+        isFavorite={selectedBookmark ? favoriteIds.has(selectedBookmark.id) : false}
         allLists={lists}
         stats={stats}
         withThumbnailCount={libraryCounts.withThumb}
@@ -717,18 +813,36 @@ export function App() {
           setSelectedTag(name);
           setActiveView("bookmarks");
         }}
+        onToggleFavorite={handleToggleFavorite}
+        onToggleArchive={handleToggleArchive}
+        onQuickLook={(b) => setQuickLookBookmark(b)}
         onUpdated={async (updated) => {
           setSelectedBookmark(updated);
+          setQuickLookBookmark((prev) => (prev?.id === updated.id ? updated : prev));
           setBookmarks((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
           await refreshMetadata();
         }}
         onDeleted={async (id) => {
           setSelectedBookmark(null);
+          setQuickLookBookmark((prev) => (prev?.id === id ? null : prev));
           setBookmarks((prev) => prev.filter((b) => b.id !== id));
           setTotalBookmarks((n) => Math.max(0, n - 1));
           await refreshMetadata();
         }}
         onNotify={notify}
+      />
+
+      <QuickLookModal
+        bookmark={quickLookBookmark}
+        isFavorite={quickLookBookmark ? favoriteIds.has(quickLookBookmark.id) : false}
+        onClose={() => setQuickLookBookmark(null)}
+        onToggleFavorite={handleToggleFavorite}
+        onToggleArchive={handleToggleArchive}
+        onInspect={(b) => {
+          setSelectedBookmark(b);
+          if (fullBleed) setFullBleed(false);
+          if (!isMobileInspector) setInspectorOpen(true);
+        }}
       />
 
       <AddBookmarkModal

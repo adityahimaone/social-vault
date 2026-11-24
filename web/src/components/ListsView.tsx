@@ -44,7 +44,7 @@ export function ListsView({ lists, onRefresh, onFilterByList, onNotify }: ListsV
   }
 
   return (
-    <section className="glass-panel glass-rim" aria-labelledby="lists-heading">
+    <section className="content-panel" aria-labelledby="lists-heading">
       <div className="panel-header">
         <div>
           <h1 id="lists-heading" className="panel-title">
@@ -93,7 +93,7 @@ export function ListsView({ lists, onRefresh, onFilterByList, onNotify }: ListsV
       ) : (
         <div className="grid-cards">
           {lists.map((list) => (
-            <div key={list.id} className="entity-card glass-rim">
+            <div key={list.id} className="entity-card">
               <button
                 type="button"
                 className="entity-card-btn"

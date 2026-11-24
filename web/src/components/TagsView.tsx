@@ -42,7 +42,7 @@ export function TagsView({ tags, onRefresh, onFilterByTag, onNotify }: TagsViewP
   }
 
   return (
-    <section className="glass-panel glass-rim" aria-labelledby="tags-heading">
+    <section className="content-panel" aria-labelledby="tags-heading">
       <div className="panel-header">
         <div>
           <h1 id="tags-heading" className="panel-title">
@@ -80,7 +80,7 @@ export function TagsView({ tags, onRefresh, onFilterByTag, onNotify }: TagsViewP
       ) : (
         <div className="grid-cards">
           {tags.map((tag) => (
-            <div key={tag.id} className="entity-card glass-rim">
+            <div key={tag.id} className="entity-card">
               <button
                 type="button"
                 className="entity-card-btn"

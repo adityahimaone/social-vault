@@ -4,6 +4,10 @@ export interface ToastItem {
   id: number;
   message: string;
   tone: "success" | "error" | "info";
+  action?: {
+    label: string;
+    onClick: () => void;
+  };
 }
 
 interface ToastViewportProps {
@@ -24,23 +28,37 @@ export function ToastViewport({ toasts, onDismiss, onPauseChange }: ToastViewpor
       onMouseLeave={() => onPauseChange(false)}
     >
       {toasts.map((t) => (
-        <div key={t.id} className="toast glass-rim" data-tone={t.tone}>
+        <div key={t.id} className="toast" data-tone={t.tone}>
           <div className="toast-content">
             {t.tone === "error" ? (
-              <AlertCircle size={16} aria-hidden="true" className="toast-icon toast-icon-error" />
+              <AlertCircle size={15} aria-hidden="true" className="toast-icon toast-icon-error" />
             ) : (
-              <CheckCircle2 size={16} aria-hidden="true" className="toast-icon toast-icon-success" />
+              <CheckCircle2 size={15} aria-hidden="true" className="toast-icon toast-icon-success" />
             )}
             <span className="toast-message">{t.message}</span>
           </div>
-          <button
-            type="button"
-            className="btn btn-ghost btn-icon toast-close-btn"
-            onClick={() => onDismiss(t.id)}
-            aria-label="Dismiss notification"
-          >
-            <X size={14} aria-hidden="true" />
-          </button>
+          <div className="toast-actions">
+            {t.action && (
+              <button
+                type="button"
+                className="toast-action-btn"
+                onClick={() => {
+                  t.action?.onClick();
+                  onDismiss(t.id);
+                }}
+              >
+                {t.action.label}
+              </button>
+            )}
+            <button
+              type="button"
+              className="toast-close-btn"
+              onClick={() => onDismiss(t.id)}
+              aria-label="Dismiss notification"
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          </div>
         </div>
       ))}
     </div>

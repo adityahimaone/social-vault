@@ -49,13 +49,13 @@ export function GlassSegmented<T extends string>({
   return (
     <div
       ref={trackRef}
-      className={`glass-segmented glass-segmented-${size} ${className}`.trim()}
+      className={`segmented-control segmented-control-${size} ${className}`.trim()}
       role="group"
       aria-label={ariaLabel}
     >
       <span
         ref={lensRef}
-        className={`glass-lens ${ready ? "is-ready" : ""}`}
+        className={`segmented-thumb ${ready ? "is-ready" : ""}`}
         aria-hidden="true"
       />
       {options.map((opt) => {
@@ -67,7 +67,7 @@ export function GlassSegmented<T extends string>({
               btnRefs.current[opt.value] = el;
             }}
             type="button"
-            className="glass-segmented-btn"
+            className="segmented-btn"
             aria-pressed={active}
             aria-label={opt.ariaLabel}
             onClick={() => onChange(opt.value)}
