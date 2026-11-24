@@ -30,6 +30,16 @@ class MiniElement {
     this.parentElement = parent || null;
     this.children = [];
     this.textParts = [];
+    this._rect = null;
+  }
+
+  setRect(rectOrFn) {
+    this._rect = rectOrFn;
+    return this;
+  }
+
+  getBoundingClientRect() {
+    return typeof this._rect === "function" ? this._rect() : this._rect;
   }
 
   getAttribute(name) {
@@ -329,4 +339,262 @@ test("createBulkSession stops immediately on fatal auth error", async () => {
   assert.equal(calls, 1);
   assert.equal(result.failed, 1);
   assert.equal(result.fatalError.code, "UNAUTHORIZED");
+});
+
+function withWindowScrollY(value, fn) {
+  const hadWindow = Object.prototype.hasOwnProperty.call(globalThis, "window");
+  const prevWindow = globalThis.window;
+  globalThis.window = value;
+  try {
+    return fn();
+  } finally {
+    if (hadWindow) {
+      globalThis.window = prevWindow;
+    } else {
+      delete globalThis.window;
+    }
+  }
+}
+
+test("extractXPostUrls filters out articles above minDocumentTop while keeping articles at or below", () => {
+  const html = fs.readFileSync(path.join(__dirname, "fixtures", "x-bookmarks.html"), "utf8");
+  const doc = parseHtml(html);
+  const articles = doc.querySelectorAll("article");
+  let scrollY = 1000;
+  doc.defaultView = {
+    get scrollY() {
+      return scrollY;
+    }
+  };
+
+  // Fixture valid articles are indices: 0 (alice), 1 (dup alice), 2 (bob), 3 (carol), 6 (i/web fallback)
+  const docTops = [400, 700, 1000, 1400, 1600, 1800, 2200];
+  articles.forEach((article, idx) => {
+    const docTop = docTops[idx];
+    article.setRect(() => ({ top: docTop - scrollY }));
+  });
+
+  // At scrollY = 1000, articles 0 (400) and 1 (700) are above 1000; article 2 is exactly 1000 (included)
+  assert.deepEqual(
+    extractor.extractXPostUrls(doc, "https://x.com", { minDocumentTop: 1000 }),
+    [
+      "https://x.com/bob_ai/status/1850000000000000002",
+      "https://x.com/carol_go/status/1850000000000000003",
+      "https://x.com/i/web/status/1850000000000000004"
+    ]
+  );
+
+  // Scrolling further down (scrollY = 1800) leaves rect.top negative for bob (1000 - 1800 = -800),
+  // yet document-top is still 1000 >= 1000, so bob stays included while alice (400, 700) stays excluded.
+  scrollY = 1800;
+  assert.deepEqual(
+    extractor.extractXPostUrls(doc, "https://x.com", { minDocumentTop: 1000 }),
+    [
+      "https://x.com/bob_ai/status/1850000000000000002",
+      "https://x.com/carol_go/status/1850000000000000003",
+      "https://x.com/i/web/status/1850000000000000004"
+    ]
+  );
+
+  // No option or minDocumentTop: 0 keeps old behaviour (all posts returned)
+  assert.deepEqual(extractor.extractXPostUrls(doc, "https://x.com"), [
+    "https://x.com/alice_dev/status/1850000000000000001",
+    "https://x.com/bob_ai/status/1850000000000000002",
+    "https://x.com/carol_go/status/1850000000000000003",
+    "https://x.com/i/web/status/1850000000000000004"
+  ]);
+  assert.deepEqual(extractor.extractXPostUrls(doc, "https://x.com", { minDocumentTop: 0 }), [
+    "https://x.com/alice_dev/status/1850000000000000001",
+    "https://x.com/bob_ai/status/1850000000000000002",
+    "https://x.com/carol_go/status/1850000000000000003",
+    "https://x.com/i/web/status/1850000000000000004"
+  ]);
+});
+
+test("extractThreadsPostUrls filters out anchors above minDocumentTop and preserves old behaviour without option", () => {
+  const html = fs.readFileSync(path.join(__dirname, "fixtures", "threads-saved.html"), "utf8");
+  const doc = parseHtml(html);
+  const anchors = doc.querySelectorAll("a[href]");
+  let scrollY = 1200;
+  doc.defaultView = {
+    get scrollY() {
+      return scrollY;
+    }
+  };
+
+  // Position every anchor based on its post href so earlier posts are < 1200 and later posts >= 1200
+  anchors.forEach((anchor) => {
+    const href = anchor.getAttribute("href") || "";
+    let docTop = 100;
+    if (href.includes("DD12345abc_")) {
+      docTop = 500;
+    } else if (href.includes("EE98765xyz")) {
+      docTop = 1200;
+    } else if (href.includes("FF55555mno")) {
+      docTop = 1600;
+    } else if (href.includes("GG11111pqr")) {
+      docTop = 2100;
+    }
+    anchor.setRect(() => ({ top: docTop - scrollY }));
+  });
+
+  assert.deepEqual(
+    extractor.extractPostUrls("threads", doc, "https://www.threads.com", { minDocumentTop: 1200 }),
+    [
+      "https://www.threads.com/@zuck/post/EE98765xyz",
+      "https://www.threads.com/post/FF55555mno",
+      "https://www.threads.net/@mosseri/post/GG11111pqr"
+    ]
+  );
+
+  // Without option or with minDocumentTop: 0 -> all posts returned
+  assert.deepEqual(extractor.extractPostUrls("threads", doc, "https://www.threads.com"), [
+    "https://www.threads.com/@aditya.dev/post/DD12345abc_",
+    "https://www.threads.com/@zuck/post/EE98765xyz",
+    "https://www.threads.com/post/FF55555mno",
+    "https://www.threads.net/@mosseri/post/GG11111pqr"
+  ]);
+  assert.deepEqual(extractor.extractPostUrls("threads", doc, "https://www.threads.com", { minDocumentTop: 0 }), [
+    "https://www.threads.com/@aditya.dev/post/DD12345abc_",
+    "https://www.threads.com/@zuck/post/EE98765xyz",
+    "https://www.threads.com/post/FF55555mno",
+    "https://www.threads.net/@mosseri/post/GG11111pqr"
+  ]);
+});
+
+test("extractors degrade gracefully when scrollY or getBoundingClientRect is unavailable", () => {
+  const html = fs.readFileSync(path.join(__dirname, "fixtures", "x-bookmarks.html"), "utf8");
+  const docWithRectsNoScroll = parseHtml(html);
+  docWithRectsNoScroll.querySelectorAll("article").forEach((article) => {
+    article.setRect({ top: -500 });
+  });
+
+  // No scrollY on doc.defaultView, options, or globalThis.window -> no filtering
+  withWindowScrollY(undefined, () => {
+    assert.deepEqual(
+      extractor.extractXPostUrls(docWithRectsNoScroll, "https://x.com", { minDocumentTop: 1000 }),
+      [
+        "https://x.com/alice_dev/status/1850000000000000001",
+        "https://x.com/bob_ai/status/1850000000000000002",
+        "https://x.com/carol_go/status/1850000000000000003",
+        "https://x.com/i/web/status/1850000000000000004"
+      ]
+    );
+  });
+
+  // scrollY available, but getBoundingClientRect missing on elements -> no filtering
+  const docNoRect = parseHtml(html);
+  docNoRect.querySelectorAll("article").forEach((article) => {
+    article.getBoundingClientRect = undefined;
+  });
+  assert.deepEqual(
+    extractor.extractXPostUrls(docNoRect, "https://x.com", { minDocumentTop: 1000, scrollY: 1000 }),
+    [
+      "https://x.com/alice_dev/status/1850000000000000001",
+      "https://x.com/bob_ai/status/1850000000000000002",
+      "https://x.com/carol_go/status/1850000000000000003",
+      "https://x.com/i/web/status/1850000000000000004"
+    ]
+  );
+});
+
+test("createBulkSession applies minDocumentTop filter on initial batch and every scroll round", async () => {
+  let scrollY = 1000;
+  let round = 0;
+
+  function makeArticleDoc(entries) {
+    const html = entries
+      .map(
+        (e) =>
+          `<article data-testid="tweet"><div><a href="/${e.user}/status/${e.id}"><time datetime="2026-10-01T10:00:00Z">Oct</time></a><div data-testid="tweetText">Post ${e.id}</div></div></article>`
+      )
+      .join("");
+    const doc = parseHtml(`<main>${html}</main>`);
+    doc.defaultView = {
+      get scrollY() {
+        return scrollY;
+      }
+    };
+    doc.querySelectorAll("article").forEach((article, idx) => {
+      const docTop = entries[idx].docTop;
+      article.setRect(() => ({ top: docTop - scrollY }));
+    });
+    return doc;
+  }
+
+  const roundDocs = [
+    // Initial round (scrollY = 1000): 101 is above start (400), 102 is at start (1000)
+    makeArticleDoc([
+      { user: "older_skip", id: "101", docTop: 400 },
+      { user: "resume_a", id: "102", docTop: 1000 }
+    ]),
+    // Scroll round 1 (scrollY = 1700): 101 still mounted above start (400), 103 is new below start (1900)
+    makeArticleDoc([
+      { user: "older_skip", id: "101", docTop: 400 },
+      { user: "resume_a", id: "102", docTop: 1000 },
+      { user: "resume_b", id: "103", docTop: 1900 }
+    ]),
+    // Scroll round 2 (scrollY = 2400): 101 still mounted above start, 104 is new below start (2600)
+    makeArticleDoc([
+      { user: "older_skip", id: "101", docTop: 400 },
+      { user: "resume_c", id: "104", docTop: 2600 }
+    ])
+  ];
+
+  const seenExtractOptions = [];
+  const savedUrls = [];
+  const progressSnapshots = [];
+
+  const session = runner.createBulkSession({
+    maxPosts: 200,
+    saveDelayMs: 0,
+    scrollWaitMs: 0,
+    maxStagnantRounds: 2,
+    sleep: () => Promise.resolve(),
+    extractUrls: (opts) => {
+      seenExtractOptions.push(opts);
+      const doc = roundDocs[Math.min(round, roundDocs.length - 1)];
+      return extractor.extractPostUrls("x", doc, "https://x.com", opts);
+    },
+    scrollStep: () => {
+      round++;
+      if (round === 1) {
+        scrollY = 1700;
+      } else if (round === 2) {
+        scrollY = 2400;
+      }
+    },
+    getScrollMetrics: () => ({ scrollY, scrollHeight: 4000 }),
+    saveUrl: async (url) => {
+      savedUrls.push(url);
+      return { ok: true, status: 201 };
+    },
+    onProgress: (stats) => {
+      progressSnapshots.push(stats);
+    }
+  });
+
+  const initialUrls = extractor.extractPostUrls("x", roundDocs[0], "https://x.com", {
+    minDocumentTop: 1000
+  });
+
+  const result = await session.start({
+    initialUrls,
+    autoScroll: true,
+    minDocumentTop: 1000
+  });
+
+  assert.ok(seenExtractOptions.length >= 3);
+  for (const opt of seenExtractOptions) {
+    assert.deepEqual(opt, { minDocumentTop: 1000 });
+  }
+  assert.equal(result.phase, "done");
+  assert.equal(result.resumedFromScroll, true);
+  assert.equal(result.minDocumentTop, 1000);
+  assert.ok(progressSnapshots.every((p) => p.resumedFromScroll === true));
+  assert.deepEqual(savedUrls, [
+    "https://x.com/resume_a/status/102",
+    "https://x.com/resume_b/status/103",
+    "https://x.com/resume_c/status/104"
+  ]);
 });

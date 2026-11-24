@@ -36,6 +36,7 @@
     skipped: 0,
     failed: 0,
     limitReached: false,
+    resumedFromScroll: false,
     alertKind: "", // "" | "info" | "error" | "success"
     alertTitle: "",
     alertDetail: "",
@@ -117,6 +118,18 @@
       svg.appendChild(p1);
       svg.appendChild(p2);
       svg.appendChild(p3);
+    } else if (type === "arrow-down") {
+      svg.setAttribute("width", "13");
+      svg.setAttribute("height", "13");
+      var arrowLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      arrowLine.setAttribute("x1", "12");
+      arrowLine.setAttribute("y1", "5");
+      arrowLine.setAttribute("x2", "12");
+      arrowLine.setAttribute("y2", "19");
+      var arrowHead = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+      arrowHead.setAttribute("points", "19 12 12 19 5 12");
+      svg.appendChild(arrowLine);
+      svg.appendChild(arrowHead);
     } else if (type === "alert") {
       var circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       circle.setAttribute("cx", "12");
@@ -419,6 +432,26 @@
       "}",
       ".status-text { font-weight: 500; min-width: 0; }",
       ".status-count { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--fg); white-space: nowrap; }",
+      ".resume-note {",
+      "  display: flex;",
+      "  align-items: center;",
+      "  gap: 6px;",
+      "  padding: 5px 8px;",
+      "  border-radius: 7px;",
+      "  background-color: var(--info-soft);",
+      "  border: 1px solid var(--info-border);",
+      "  color: var(--info-text);",
+      "  font-size: 11.5px;",
+      "  font-weight: 500;",
+      "  line-height: 1.35;",
+      "  opacity: 1;",
+      "  transform: translateY(0);",
+      "  transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out);",
+      "}",
+      ".resume-note svg { flex-shrink: 0; }",
+      "@starting-style {",
+      "  .resume-note { opacity: 0; transform: translateY(-2px); }",
+      "}",
       ".progress-track {",
       "  width: 100%;",
       "  height: 5px;",
@@ -505,12 +538,21 @@
       "@keyframes sv-bulk-spin { to { transform: rotate(360deg); } }",
       "@media (prefers-reduced-motion: reduce) {",
       "  .panel { transform: none; transition: opacity 150ms ease; }",
-      "  .btn, .icon-btn, .switch, .switch-thumb, .progress-fill, .icon-btn svg { transition: none; }",
+      "  .btn, .icon-btn, .switch, .switch-thumb, .progress-fill, .icon-btn svg, .resume-note { transition: none; }",
+      "  .resume-note { transform: none; }",
       "  .btn:active:not(:disabled), .icon-btn:active:not(:disabled), .switch:active:not(:disabled) { transform: none; }",
       "  .spinner { animation-duration: 1.4s; }",
       "}"
     ].join("\n");
     return style;
+  }
+
+  function getCurrentScrollY() {
+    var raw = typeof window.scrollY === "number" ? window.scrollY : window.pageYOffset;
+    if (typeof raw !== "number" || !isFinite(raw) || raw <= 0) {
+      return 0;
+    }
+    return raw;
   }
 
   function scanVisibleUrls() {
@@ -527,8 +569,14 @@
     if (!activeRoute || scanTimer !== null) {
       return;
     }
+    if (activeSession && activeSession.isRunning()) {
+      return;
+    }
     scanTimer = setTimeout(function () {
       scanTimer = null;
+      if (activeSession && activeSession.isRunning()) {
+        return;
+      }
       scanVisibleUrls();
       render();
     }, 350);
@@ -550,11 +598,11 @@
       return;
     }
 
-    var busy = state.phase === "scrolling" || state.phase === "saving";
+    var busy = state.phase === "collecting" || state.phase === "scrolling" || state.phase === "saving";
     refs.panel.setAttribute("data-collapsed", state.collapsed ? "true" : "false");
     refs.routeLabel.textContent = activeRoute.label;
 
-    var count = Math.max(state.detectedUrls.length, state.collected);
+    var count = state.phase === "idle" ? state.detectedUrls.length : state.collected;
     refs.countPill.textContent = count === 1 ? "1 post" : count + " posts";
     refs.collapseBtn.setAttribute("aria-expanded", state.collapsed ? "false" : "true");
     refs.collapseBtn.setAttribute("aria-label", state.collapsed ? "Expand Social Vault panel" : "Collapse Social Vault panel");
@@ -580,12 +628,16 @@
 
     var showProgress = state.phase !== "idle";
     refs.progressCard.classList.toggle("hidden", !showProgress);
+    refs.resumeNote.classList.toggle("hidden", !(state.resumedFromScroll && busy));
 
     if (showProgress) {
       var statusLabel = "Ready";
       var countText = state.processed + " / " + state.total;
 
-      if (state.phase === "scrolling") {
+      if (state.phase === "collecting") {
+        statusLabel = "Collecting posts…";
+        countText = state.collected + " found";
+      } else if (state.phase === "scrolling") {
         statusLabel = state.limitReached ? "Reached 200-post limit" : "Scrolling & collecting posts…";
         countText = state.collected + " found";
       } else if (state.phase === "saving") {
@@ -606,7 +658,7 @@
       refs.statusCount.textContent = countText;
 
       var ratio = 0;
-      if (state.phase === "scrolling") {
+      if (state.phase === "collecting" || state.phase === "scrolling") {
         ratio = Math.min(1, Math.max(0.08, state.collected / MAX_POSTS));
       } else if (state.total > 0) {
         ratio = Math.min(1, state.processed / state.total);
@@ -641,8 +693,13 @@
       return;
     }
 
+    var startScrollY = getCurrentScrollY();
+    var resumedFromScroll = startScrollY > 0;
+
     clearAlert();
-    scanVisibleUrls();
+    if (!resumedFromScroll) {
+      scanVisibleUrls();
+    }
 
     sendRuntimeMessage({ type: "BULK_GET_CONFIG" }).then(function (cfg) {
       if (!cfg || !cfg.ok) {
@@ -668,21 +725,35 @@
         return;
       }
 
-      var initialUrls = state.detectedUrls.slice();
+      var routeSnapshot = activeRoute;
+      var initialUrls = resumedFromScroll
+        ? extractor.extractPostUrls(routeSnapshot.platform, document, window.location.origin, {
+            minDocumentTop: startScrollY
+          })
+        : state.detectedUrls.slice();
       if (!state.autoScroll && initialUrls.length === 0) {
-        setAlert("info", "No posts detected yet", "Scroll the feed or turn on Auto-scroll to load posts first.", false);
+        if (resumedFromScroll) {
+          setAlert(
+            "info",
+            "No posts detected below your scroll position",
+            "Scroll the feed or turn on Auto-scroll to load older posts.",
+            false
+          );
+        } else {
+          setAlert("info", "No posts detected yet", "Scroll the feed or turn on Auto-scroll to load posts first.", false);
+        }
         render();
         return;
       }
 
-      var routeSnapshot = activeRoute;
+      state.resumedFromScroll = resumedFromScroll;
       activeSession = runner.createBulkSession({
         maxPosts: MAX_POSTS,
         saveDelayMs: 150,
         scrollWaitMs: 900,
         maxStagnantRounds: 3,
-        extractUrls: function () {
-          return extractor.extractPostUrls(routeSnapshot.platform, document, window.location.origin);
+        extractUrls: function (extractOpts) {
+          return extractor.extractPostUrls(routeSnapshot.platform, document, window.location.origin, extractOpts);
         },
         scrollStep: function () {
           var stepPx = Math.max(Math.round((window.innerHeight || 800) * 0.85), 600);
@@ -711,7 +782,8 @@
           state.skipped = progress.skipped;
           state.failed = progress.failed;
           state.limitReached = progress.limitReached;
-          if (progress.collected > state.detectedUrls.length) {
+          state.resumedFromScroll = Boolean(progress.resumedFromScroll);
+          if (!resumedFromScroll && progress.collected > state.detectedUrls.length) {
             scanVisibleUrls();
           }
           render();
@@ -721,7 +793,8 @@
       activeSession
         .start({
           initialUrls: initialUrls,
-          autoScroll: state.autoScroll
+          autoScroll: state.autoScroll,
+          minDocumentTop: startScrollY
         })
         .then(function (summary) {
           activeSession = null;
@@ -733,6 +806,7 @@
           state.skipped = summary.skipped;
           state.failed = summary.failed;
           state.limitReached = summary.limitReached;
+          state.resumedFromScroll = Boolean(summary.resumedFromScroll);
 
           if (summary.fatalError) {
             var needsSettings =
@@ -925,7 +999,15 @@
     metrics.appendChild(mSkipped.box);
     metrics.appendChild(mFailed.box);
 
+    var resumeNote = document.createElement("div");
+    resumeNote.className = "resume-note hidden";
+    resumeNote.appendChild(createSvgIcon("arrow-down"));
+    var resumeNoteText = document.createElement("span");
+    resumeNoteText.textContent = "Resuming from your scroll position — older posts only";
+    resumeNote.appendChild(resumeNoteText);
+
     progressCard.appendChild(statusLine);
+    progressCard.appendChild(resumeNote);
     progressCard.appendChild(progressTrack);
     progressCard.appendChild(metrics);
 
@@ -976,6 +1058,7 @@
       progressCard: progressCard,
       statusText: statusText,
       statusCount: statusCount,
+      resumeNote: resumeNote,
       progressFill: progressFill,
       savedVal: mSaved.val,
       skippedVal: mSkipped.val,
@@ -1029,6 +1112,7 @@
     state.skipped = 0;
     state.failed = 0;
     state.limitReached = false;
+    state.resumedFromScroll = false;
     clearAlert();
   }
 

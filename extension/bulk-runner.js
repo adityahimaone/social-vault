@@ -105,12 +105,17 @@
       var cfg = runOptions || {};
       var autoScroll = cfg.autoScroll !== false;
       var initialUrls = Array.isArray(cfg.initialUrls) ? cfg.initialUrls : [];
+      var minDocumentTop =
+        typeof cfg.minDocumentTop === "number" && isFinite(cfg.minDocumentTop) && cfg.minDocumentTop > 0
+          ? cfg.minDocumentTop
+          : 0;
+      var extractOptions = minDocumentTop > 0 ? { minDocumentTop: minDocumentTop } : undefined;
 
       aborted = false;
       running = true;
 
       var collected = mergeUrlsLocal([], initialUrls, maxPosts).urls;
-      var firstBatch = extractUrls() || [];
+      var firstBatch = extractUrls(extractOptions) || [];
       collected = mergeUrlsLocal(collected, firstBatch, maxPosts).urls;
 
       var stats = {
@@ -122,6 +127,8 @@
         skipped: 0,
         failed: 0,
         limitReached: collected.length >= maxPosts,
+        minDocumentTop: minDocumentTop,
+        resumedFromScroll: minDocumentTop > 0,
         fatalError: null,
         lastError: null
       };
@@ -148,7 +155,7 @@
               return;
             }
 
-            var batch = extractUrls() || [];
+            var batch = extractUrls(extractOptions) || [];
             var merged = mergeUrlsLocal(collected, batch, maxPosts);
             collected = merged.urls;
 

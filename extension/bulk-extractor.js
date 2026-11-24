@@ -228,6 +228,70 @@
     return val === null || val === undefined ? "" : String(val);
   }
 
+  function normalizeMinDocumentTop(options) {
+    if (!options || typeof options !== "object") {
+      return 0;
+    }
+    if (typeof options.minDocumentTop === "number" && isFinite(options.minDocumentTop) && options.minDocumentTop > 0) {
+      return options.minDocumentTop;
+    }
+    return 0;
+  }
+
+  function resolveScrollY(rootEl, options) {
+    if (options && typeof options === "object" && typeof options.scrollY === "number" && isFinite(options.scrollY)) {
+      return options.scrollY;
+    }
+    var docView = rootEl && rootEl.defaultView;
+    if (docView) {
+      if (typeof docView.scrollY === "number" && isFinite(docView.scrollY)) {
+        return docView.scrollY;
+      }
+      if (typeof docView.pageYOffset === "number" && isFinite(docView.pageYOffset)) {
+        return docView.pageYOffset;
+      }
+    }
+    if (typeof window !== "undefined" && window) {
+      if (typeof window.scrollY === "number" && isFinite(window.scrollY)) {
+        return window.scrollY;
+      }
+      if (typeof window.pageYOffset === "number" && isFinite(window.pageYOffset)) {
+        return window.pageYOffset;
+      }
+    }
+    if (root && typeof root.scrollY === "number" && isFinite(root.scrollY)) {
+      return root.scrollY;
+    }
+    return null;
+  }
+
+  function getElementRectTop(el) {
+    if (!el || typeof el.getBoundingClientRect !== "function") {
+      return null;
+    }
+    var rect;
+    try {
+      rect = el.getBoundingClientRect();
+    } catch (_err) {
+      return null;
+    }
+    if (rect && typeof rect.top === "number" && isFinite(rect.top)) {
+      return rect.top;
+    }
+    return null;
+  }
+
+  function isAboveMinDocumentTop(el, minDocumentTop, currentScrollY) {
+    if (!minDocumentTop || minDocumentTop <= 0 || currentScrollY === null) {
+      return false;
+    }
+    var rectTop = getElementRectTop(el);
+    if (rectTop === null) {
+      return false;
+    }
+    return rectTop + currentScrollY < minDocumentTop;
+  }
+
   function isInsideQuoteOrNestedArticle(node, rootArticle) {
     var quote = safeClosest(node, '[role="blockquote"]');
     if (quote && quote !== rootArticle) {
@@ -376,12 +440,14 @@
     return false;
   }
 
-  function extractXPostUrls(rootEl, baseOrigin) {
+  function extractXPostUrls(rootEl, baseOrigin, options) {
     if (!rootEl) {
       return [];
     }
 
     var origin = baseOrigin || "https://x.com";
+    var minDocumentTop = normalizeMinDocumentTop(options);
+    var currentScrollY = minDocumentTop > 0 ? resolveScrollY(rootEl, options) : null;
     var articles = safeQueryAll(rootEl, "article");
     var orderedIds = [];
     var byId = Object.create(null);
@@ -389,6 +455,10 @@
     for (var i = 0; i < articles.length; i++) {
       var article = articles[i];
       if (article.parentElement && safeClosest(article.parentElement, "article")) {
+        continue;
+      }
+
+      if (isAboveMinDocumentTop(article, minDocumentTop, currentScrollY)) {
         continue;
       }
 
@@ -510,12 +580,14 @@
     return null;
   }
 
-  function extractThreadsPostUrls(rootEl, baseOrigin) {
+  function extractThreadsPostUrls(rootEl, baseOrigin, options) {
     if (!rootEl) {
       return [];
     }
 
     var origin = baseOrigin || "https://www.threads.com";
+    var minDocumentTop = normalizeMinDocumentTop(options);
+    var currentScrollY = minDocumentTop > 0 ? resolveScrollY(rootEl, options) : null;
     var anchors = safeQueryAll(rootEl, "a[href]");
     var orderedIds = [];
     var byId = Object.create(null);
@@ -527,6 +599,13 @@
       }
       if (safeClosest(anchor, '[data-unavailable="true"], [data-deleted="true"]')) {
         continue;
+      }
+
+      if (minDocumentTop > 0 && currentScrollY !== null) {
+        var positionTarget = getElementRectTop(anchor) !== null ? anchor : safeClosest(anchor, "article");
+        if (isAboveMinDocumentTop(positionTarget, minDocumentTop, currentScrollY)) {
+          continue;
+        }
       }
 
       var info = parseThreadsPostUrl(safeGetAttr(anchor, "href"), origin);
@@ -549,12 +628,12 @@
     return out;
   }
 
-  function extractPostUrls(platform, rootEl, baseOrigin) {
+  function extractPostUrls(platform, rootEl, baseOrigin, options) {
     if (platform === "x") {
-      return extractXPostUrls(rootEl, baseOrigin);
+      return extractXPostUrls(rootEl, baseOrigin, options);
     }
     if (platform === "threads") {
-      return extractThreadsPostUrls(rootEl, baseOrigin);
+      return extractThreadsPostUrls(rootEl, baseOrigin, options);
     }
     return [];
   }
