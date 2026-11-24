@@ -1,4 +1,6 @@
-import type { Bookmark, ImportResult, List, Stats, Tag } from "./types";
+import type { Bookmark, ImportResult, List, Stats, Tag, TaggingStatus } from "./types";
+
+export type { TaggingStatus } from "./types";
 
 let onUnauthorizedHandler: (() => void) | null = null;
 
@@ -155,4 +157,7 @@ export const api = {
       body: fd,
     });
   },
+
+  taggingStatus: (signal?: AbortSignal) =>
+    request<TaggingStatus>("/api/tagging/status", { signal }),
 };

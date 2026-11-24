@@ -77,6 +77,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/tag-review/{id}/apply", protect(http.HandlerFunc(s.handleApplyTagReview)))
 	s.mux.Handle("POST /api/tag-review/{id}/dismiss", protect(http.HandlerFunc(s.handleDismissTagReview)))
 	s.mux.Handle("POST /api/tagging/backfill", protect(http.HandlerFunc(s.handleBackfillTagging)))
+	s.mux.Handle("GET /api/tagging/status", protect(http.HandlerFunc(s.handleTaggingStatus)))
 
 	// Return 404 JSON for unmatched /api/* routes, SPA static assets otherwise
 	s.mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {

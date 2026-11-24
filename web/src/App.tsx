@@ -13,6 +13,7 @@ import { Sidebar } from "./components/Sidebar";
 import { StatsBar } from "./components/StatsBar";
 import { TagsView } from "./components/TagsView";
 import { ToastViewport, type ToastItem } from "./components/Toast";
+import { useTaggingToasts } from "./hooks/useTaggingToasts";
 import type {
   ActiveView,
   ArchivedFilter,
@@ -178,6 +179,8 @@ export function App() {
     },
     []
   );
+
+  useTaggingToasts(authState.authenticated, notify);
 
   useEffect(() => {
     if (toasts.length === 0 || toastPaused) return;

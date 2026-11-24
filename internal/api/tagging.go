@@ -112,3 +112,12 @@ func (s *Server) handleBackfillTagging(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, result)
 }
+
+func (s *Server) handleTaggingStatus(w http.ResponseWriter, r *http.Request) {
+	status, err := s.tagger.Status(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get tagging status")
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}

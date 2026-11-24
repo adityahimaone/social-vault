@@ -66,6 +66,11 @@ func TestTagReviewQueueLifecycleAndBackfillQuery(t *testing.T) {
 		t.Fatalf("expected bookmark title and url on pending item, got %+v", pending[0])
 	}
 
+	pendingCount, err := store.CountPendingTagReviews(ctx)
+	if err != nil || pendingCount != 2 {
+		t.Fatalf("expected CountPendingTagReviews=2, got %d (err=%v)", pendingCount, err)
+	}
+
 	// Untaggable backfill query should exclude bm1 (has tags + pending), bm2 (has pending),
 	// and return only bm3.
 	backfillList, err := store.ListUntaggedBookmarksForBackfill(ctx, 50)
@@ -94,12 +99,17 @@ func TestTagReviewQueueLifecycleAndBackfillQuery(t *testing.T) {
 		}
 	}
 
+	pendingCount, err = store.CountPendingTagReviews(ctx)
+	if err != nil || pendingCount != 1 {
+		t.Fatalf("expected CountPendingTagReviews=1 after apply, got %d (err=%v)", pendingCount, err)
+	}
+
 	// Second apply returns ErrAlreadyResolved.
 	if _, _, err := store.ApplyTagReview(ctx, item1.ID); !errors.Is(err, db.ErrAlreadyResolved) {
 		t.Fatalf("expected ErrAlreadyResolved on re-apply, got %v", err)
 	}
 
-	// Dismiss item2: marks dismissed, does not add tags, and allows bm2 to be eligible again if untagged.
+	// Dismiss item2: marks dismissed, does not add tags, and keeps bm2 excluded from backfill.
 	dismissedItem, err := store.DismissTagReview(ctx, item2.ID)
 	if err != nil {
 		t.Fatalf("dismiss item2: %v", err)
@@ -119,8 +129,35 @@ func TestTagReviewQueueLifecycleAndBackfillQuery(t *testing.T) {
 		t.Fatalf("expected ErrAlreadyResolved on re-dismiss, got %v", err)
 	}
 
+	pendingCount, err = store.CountPendingTagReviews(ctx)
+	if err != nil || pendingCount != 0 {
+		t.Fatalf("expected CountPendingTagReviews=0 after dismiss, got %d (err=%v)", pendingCount, err)
+	}
+
 	pendingAfter, err := store.ListPendingTagReviews(ctx, 50)
 	if err != nil || len(pendingAfter) != 0 {
 		t.Fatalf("expected 0 pending items after resolve, got %d (err=%v)", len(pendingAfter), err)
+	}
+
+	// Backfill must still exclude bm2 (dismissed) and return only bm3.
+	backfillAfterDismiss, err := store.ListUntaggedBookmarksForBackfill(ctx, 50)
+	if err != nil {
+		t.Fatalf("list backfill after dismiss: %v", err)
+	}
+	if len(backfillAfterDismiss) != 1 || backfillAfterDismiss[0].ID != bm3.ID {
+		t.Fatalf("expected only bm3 after dismiss (bm2 must remain skipped), got %+v", backfillAfterDismiss)
+	}
+
+	// Clearing tags on bm1 (which has an applied row) still keeps it excluded from backfill.
+	emptyTags := []string{}
+	if _, err := store.UpdateBookmark(ctx, bm1.ID, db.UpdateBookmarkInput{Tags: &emptyTags}); err != nil {
+		t.Fatalf("clear bm1 tags: %v", err)
+	}
+	backfillAfterClear, err := store.ListUntaggedBookmarksForBackfill(ctx, 50)
+	if err != nil {
+		t.Fatalf("list backfill after clear: %v", err)
+	}
+	if len(backfillAfterClear) != 1 || backfillAfterClear[0].ID != bm3.ID {
+		t.Fatalf("expected only bm3 after clearing bm1 tags (applied row must skip), got %+v", backfillAfterClear)
 	}
 }

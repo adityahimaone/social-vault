@@ -47,6 +47,44 @@ export interface ImportResult {
   errors: number;
 }
 
+export interface ActiveJevJob {
+  bookmark_id: number;
+  started_at: string;
+}
+
+export interface JevEvent {
+  seq: number;
+  bookmark_id: number;
+  applied_tags: string[];
+  queued: boolean;
+  error: string;
+  finished_at: string;
+}
+
+export interface BackfillResult {
+  processed: number;
+  rules_tagged: number;
+  jev_tagged: number;
+  queued: number;
+  skipped: number;
+  failed: number;
+}
+
+export interface BackfillStatus {
+  running: boolean;
+  started_at: string;
+  finished_at: string;
+  result: BackfillResult | null;
+}
+
+export interface TaggingStatus {
+  jev_enabled: boolean;
+  active_jev_jobs: ActiveJevJob[];
+  last_jev_event: JevEvent | null;
+  last_backfill: BackfillStatus;
+  pending_review: number;
+}
+
 export type ActiveView = "bookmarks" | "tags" | "lists" | "import";
 export type ArchivedFilter = "all" | "false" | "true";
 export type LibrarySection = "all" | "favorites" | "untagged" | "recent" | "archived";

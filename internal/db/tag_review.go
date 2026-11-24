@@ -281,7 +281,16 @@ func (s *Store) DismissTagReview(ctx context.Context, id int64) (*TagReviewItem,
 	return s.GetTagReview(ctx, id)
 }
 
-// ListUntaggedBookmarksForBackfill returns bookmarks with zero tags and no pending review queue row.
+// CountPendingTagReviews returns the number of pending rows in tag_review_queue.
+func (s *Store) CountPendingTagReviews(ctx context.Context) (int, error) {
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tag_review_queue WHERE status = 'pending'`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count pending tag reviews: %w", err)
+	}
+	return count, nil
+}
+
+// ListUntaggedBookmarksForBackfill returns bookmarks with zero tags and no review queue row (pending, applied, or dismissed).
 func (s *Store) ListUntaggedBookmarksForBackfill(ctx context.Context, limit int) ([]Bookmark, error) {
 	if limit <= 0 {
 		limit = 50
@@ -297,7 +306,7 @@ func (s *Store) ListUntaggedBookmarksForBackfill(ctx context.Context, limit int)
 			SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id
 		)
 		AND NOT EXISTS (
-			SELECT 1 FROM tag_review_queue q WHERE q.bookmark_id = b.id AND q.status = 'pending'
+			SELECT 1 FROM tag_review_queue q WHERE q.bookmark_id = b.id
 		)
 		ORDER BY b.created_at DESC, b.id DESC
 		LIMIT ?

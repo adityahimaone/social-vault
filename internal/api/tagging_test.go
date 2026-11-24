@@ -269,6 +269,28 @@ func TestHybridAutoTaggingAPI(t *testing.T) {
 			t.Fatalf("expected 200 on dismiss, got %d", dResp.StatusCode)
 		}
 
+		// Backfill run 3: dismissed b3 must NOT re-enter the queue; only b4 is processed.
+		bResp3 := doAPIRequest(t, http.MethodPost, ts.URL+"/api/tagging/backfill", `{"limit": 10}`)
+		defer bResp3.Body.Close()
+		if bResp3.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 on backfill run 3, got %d", bResp3.StatusCode)
+		}
+		var res3 tagging.BackfillResult
+		_ = json.NewDecoder(bResp3.Body).Decode(&res3)
+		if res3.Processed != 1 || res3.Skipped != 1 || res3.Queued != 0 || res3.RulesTagged != 0 || res3.JevTagged != 0 {
+			t.Fatalf("expected dismissed b3 to stay skipped in backfill run 3, got %+v", res3)
+		}
+
+		qRespAfter := doAPIRequest(t, http.MethodGet, ts.URL+"/api/tag-review", "")
+		defer qRespAfter.Body.Close()
+		var listAfter struct {
+			Items []db.TagReviewItem `json:"items"`
+		}
+		_ = json.NewDecoder(qRespAfter.Body).Decode(&listAfter)
+		if len(listAfter.Items) != 0 {
+			t.Fatalf("expected 0 pending items after backfill run 3, got %d", len(listAfter.Items))
+		}
+
 		// Unauthenticated request to /api/tag-review returns 401
 		unauthResp, err := http.Get(ts.URL + "/api/tag-review")
 		if err != nil {
@@ -277,6 +299,107 @@ func TestHybridAutoTaggingAPI(t *testing.T) {
 		unauthResp.Body.Close()
 		if unauthResp.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("expected 401 unauth, got %d", unauthResp.StatusCode)
+		}
+	})
+}
+
+func TestTaggingStatusAPI(t *testing.T) {
+	t.Run("requires auth and handles disabled Jev without error", func(t *testing.T) {
+		ts, _, _ := setupTaggingTestServer(t, tagging.NewJevClient(""))
+
+		unauthResp, err := http.Get(ts.URL + "/api/tagging/status")
+		if err != nil {
+			t.Fatalf("unauth status: %v", err)
+		}
+		unauthResp.Body.Close()
+		if unauthResp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected 401 unauth, got %d", unauthResp.StatusCode)
+		}
+
+		resp := doAPIRequest(t, http.MethodGet, ts.URL+"/api/tagging/status", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 on tagging status, got %d", resp.StatusCode)
+		}
+		raw, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if !strings.Contains(string(raw), `"active_jev_jobs":[]`) {
+			t.Fatalf("expected empty JSON array for active_jev_jobs, got %s", string(raw))
+		}
+		var st tagging.Status
+		if err := json.Unmarshal(raw, &st); err != nil {
+			t.Fatalf("decode status: %v", err)
+		}
+		if st.JevEnabled || len(st.ActiveJevJobs) != 0 || st.LastJevEvent != nil || st.LastBackfill.Running || st.LastBackfill.Result != nil || st.PendingReview != 0 {
+			t.Fatalf("unexpected disabled status: %+v", st)
+		}
+	})
+
+	t.Run("reports async jev event, pending review, and last backfill", func(t *testing.T) {
+		jevSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"model": "jev-1.13.0",
+				"answers": {
+					"ai": {"type": "noul", "noul": 0.91},
+					"security": {"type": "noul", "noul": 0.64}
+				}
+			}`))
+		}))
+		defer jevSrv.Close()
+
+		ts, _, tagger := setupTaggingTestServer(t, tagging.NewJevClientWithOptions("stub-key", jevSrv.URL, nil))
+
+		saveResp := doAPIRequest(t, http.MethodPost, ts.URL+"/api/bookmarks", `{
+			"url": "https://example.org/status-async",
+			"title": "Opaque async status check",
+			"description": "No keyword match"
+		}`)
+		saveResp.Body.Close()
+		if saveResp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", saveResp.StatusCode)
+		}
+
+		tagger.Wait()
+
+		stResp := doAPIRequest(t, http.MethodGet, ts.URL+"/api/tagging/status", "")
+		defer stResp.Body.Close()
+		if stResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 on status, got %d", stResp.StatusCode)
+		}
+		var st tagging.Status
+		if err := json.NewDecoder(stResp.Body).Decode(&st); err != nil {
+			t.Fatalf("decode status: %v", err)
+		}
+		if !st.JevEnabled || len(st.ActiveJevJobs) != 0 {
+			t.Fatalf("expected jev_enabled=true and no active jobs, got %+v", st)
+		}
+		if st.LastJevEvent == nil || st.LastJevEvent.Seq != 1 || !slices.Equal(st.LastJevEvent.AppliedTags, []string{"ai"}) || !st.LastJevEvent.Queued || st.LastJevEvent.Error != "" {
+			t.Fatalf("unexpected LastJevEvent: %+v", st.LastJevEvent)
+		}
+		if st.PendingReview != 1 {
+			t.Fatalf("expected PendingReview=1, got %d", st.PendingReview)
+		}
+
+		bfResp := doAPIRequest(t, http.MethodPost, ts.URL+"/api/tagging/backfill", `{}`)
+		bfResp.Body.Close()
+		if bfResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 on backfill, got %d", bfResp.StatusCode)
+		}
+
+		stResp2 := doAPIRequest(t, http.MethodGet, ts.URL+"/api/tagging/status", "")
+		defer stResp2.Body.Close()
+		var st2 tagging.Status
+		if err := json.NewDecoder(stResp2.Body).Decode(&st2); err != nil {
+			t.Fatalf("decode status2: %v", err)
+		}
+		if st2.LastBackfill.Running || st2.LastBackfill.Result == nil || st2.LastBackfill.Result.Processed != 0 {
+			t.Fatalf("unexpected LastBackfill after backfill: %+v", st2.LastBackfill)
+		}
+		if st2.LastJevEvent == nil || st2.LastJevEvent.Seq != 1 {
+			t.Fatalf("expected backfill not to alter LastJevEvent.Seq, got %+v", st2.LastJevEvent)
 		}
 	})
 }
