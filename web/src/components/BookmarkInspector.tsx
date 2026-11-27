@@ -537,25 +537,27 @@ export function BookmarkInspector({
               )}
             </div>
 
-            {allLists.length > 0 && (
+            {allLists.some((l) => !l.is_smart) && (
               <div className="field">
                 <span className="field-label">Lists</span>
                 <div className="pill-row">
-                  {allLists.map((list) => {
-                    const checked = selectedListIDs.includes(list.id);
-                    return (
-                      <button
-                        key={list.id}
-                        type="button"
-                        className={checked ? "list-pill" : "tag-pill"}
-                        aria-pressed={checked}
-                        onClick={() => toggleList(list.id)}
-                      >
-                        <FolderKanban size={11} aria-hidden="true" />
-                        {list.name}
-                      </button>
-                    );
-                  })}
+                  {allLists
+                    .filter((list) => !list.is_smart)
+                    .map((list) => {
+                      const checked = selectedListIDs.includes(list.id);
+                      return (
+                        <button
+                          key={list.id}
+                          type="button"
+                          className={checked ? "list-pill" : "tag-pill"}
+                          aria-pressed={checked}
+                          onClick={() => toggleList(list.id)}
+                        >
+                          <FolderKanban size={11} aria-hidden="true" />
+                          {list.name}
+                        </button>
+                      );
+                    })}
                 </div>
               </div>
             )}

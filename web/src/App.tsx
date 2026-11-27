@@ -9,6 +9,7 @@ import { ImportView } from "./components/ImportView";
 import { ListsView } from "./components/ListsView";
 import { LoginView } from "./components/LoginView";
 import { QuickLookModal } from "./components/QuickLookModal";
+import { ReviewQueueView } from "./components/ReviewQueueView";
 import { Sidebar } from "./components/Sidebar";
 import { StatsBar } from "./components/StatsBar";
 import { TagsView } from "./components/TagsView";
@@ -26,6 +27,7 @@ import type {
   SortMode,
   Stats,
   Tag,
+  TaggingStatus,
 } from "./types";
 import { filterAndSortBookmarks, isWithinDays } from "./utils/bookmarks";
 
@@ -130,6 +132,7 @@ export function App() {
   const [archivedFilter, setArchivedFilter] = useState<ArchivedFilter>("all");
   const [selectedTag, setSelectedTag] = useState("");
   const [selectedList, setSelectedList] = useState("");
+  const [activeListId, setActiveListId] = useState<number | null>(null);
   const [nsfwLockedOverride, setNsfwLockedOverride] = useState<boolean | null>(null);
 
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
@@ -139,6 +142,7 @@ export function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [tags, setTags] = useState<Tag[]>([]);
   const [lists, setLists] = useState<List[]>([]);
+  const [taggingStatus, setTaggingStatus] = useState<TaggingStatus | null>(null);
 
   const [favoriteIds, setFavoriteIds] = useState<Set<number>>(readFavoriteIds);
   const [selectedBookmark, setSelectedBookmark] = useState<Bookmark | null>(null);
@@ -231,10 +235,16 @@ export function App() {
   }, [searchInput]);
 
   const refreshMetadata = useCallback(async () => {
-    const [s, t, l] = await Promise.all([api.stats(), api.listTags(), api.listLists()]);
+    const [s, t, l, ts] = await Promise.all([
+      api.stats(),
+      api.listTags(),
+      api.listLists(),
+      api.taggingStatus().catch(() => null),
+    ]);
     setStats(s);
     setTags(t.items);
     setLists(l.items);
+    if (ts) setTaggingStatus(ts);
   }, []);
 
   const refreshBookmarks = useCallback(
@@ -247,6 +257,7 @@ export function App() {
             archived: archivedFilter,
             tag: selectedTag,
             list: selectedList,
+            untagged: librarySection === "untagged",
             limit: 200,
             offset: 0,
           },
@@ -261,7 +272,7 @@ export function App() {
         setLoadingBookmarks(false);
       }
     },
-    [debouncedQuery, archivedFilter, selectedTag, selectedList, notify]
+    [debouncedQuery, archivedFilter, selectedTag, selectedList, librarySection, notify]
   );
 
   async function handleLoadMore() {
@@ -273,6 +284,7 @@ export function App() {
         archived: archivedFilter,
         tag: selectedTag,
         list: selectedList,
+        untagged: librarySection === "untagged",
         limit: 200,
         offset: bookmarks.length,
       });
@@ -326,12 +338,12 @@ export function App() {
     return {
       all: stats?.total ?? totalBookmarks,
       favorites,
-      untagged,
+      untagged: taggingStatus?.untagged_count ?? untagged,
       recent,
       archived: stats?.archived ?? 0,
       withThumb,
     };
-  }, [bookmarks, stats, totalBookmarks, favoriteIds]);
+  }, [bookmarks, stats, totalBookmarks, favoriteIds, taggingStatus]);
 
   const focusSearchInput = useCallback(() => {
     setActiveView("bookmarks");
@@ -506,6 +518,31 @@ export function App() {
     [favoriteIds, notify]
   );
 
+  const handleToggleBookmarkList = useCallback(
+    async (item: Bookmark, list: List) => {
+      const inList = item.lists.some((l) => l.id === list.id);
+      try {
+        if (inList) {
+          await api.removeBookmarkFromList(list.id, item.id);
+        } else {
+          await api.addBookmarksToList(list.id, [item.id]);
+        }
+        const nextLists = inList
+          ? item.lists.filter((l) => l.id !== list.id)
+          : [...item.lists, list];
+        const updatedItem: Bookmark = { ...item, lists: nextLists };
+        setBookmarks((prev) => prev.map((b) => (b.id === item.id ? updatedItem : b)));
+        setSelectedBookmark((prev) => (prev?.id === item.id ? updatedItem : prev));
+        setQuickLookBookmark((prev) => (prev?.id === item.id ? updatedItem : prev));
+        await refreshMetadata();
+        notify(inList ? `Removed from "${list.name}"` : `Added to "${list.name}"`, "success");
+      } catch (err) {
+        notify(err instanceof ApiError ? err.message : "Failed to update list membership", "error");
+      }
+    },
+    [notify, refreshMetadata]
+  );
+
   function clearFilters() {
     setSearchInput("");
     setDebouncedQuery("");
@@ -550,6 +587,8 @@ export function App() {
   const effectiveSidebarCollapsed = fullBleed || sidebarCollapsed;
   const effectiveInspectorOpen =
     !fullBleed && (isMobileInspector ? Boolean(selectedBookmark) : inspectorOpen);
+  const activeListName =
+    activeListId != null ? lists.find((l) => l.id === activeListId)?.name ?? null : null;
 
   return (
     <div
@@ -578,8 +617,11 @@ export function App() {
         onToggleSmartFilter={handleToggleSmartFilter}
         selectedTag={selectedTag}
         selectedList={selectedList}
+        activeListId={activeListId}
+        pendingReviewCount={taggingStatus?.pending_review ?? 0}
         onSelectTagFilter={setSelectedTag}
         onSelectListFilter={setSelectedList}
+        onSelectListDetail={setActiveListId}
         searchInput={searchInput}
         onSearchChange={setSearchInput}
         searchInputRef={sidebarSearchRef}
@@ -599,6 +641,7 @@ export function App() {
           librarySection={librarySection}
           selectedTag={selectedTag}
           selectedList={selectedList}
+          activeListName={activeListName}
           visibleCount={visibleBookmarks.length}
           totalCount={totalBookmarks}
           searchInput={searchInput}
@@ -745,6 +788,7 @@ export function App() {
 
               <BookmarkList
                 items={visibleBookmarks}
+                lists={lists}
                 totalAvailable={totalBookmarks}
                 loading={loadingBookmarks}
                 viewMode={viewMode}
@@ -764,6 +808,11 @@ export function App() {
                 onQuickLook={(b) => setQuickLookBookmark(b)}
                 onToggleFavorite={handleToggleFavorite}
                 onToggleArchive={handleToggleArchive}
+                onToggleBookmarkList={handleToggleBookmarkList}
+                onOpenLists={() => {
+                  setActiveListId(null);
+                  setActiveView("lists");
+                }}
                 onSelectTag={(name) => setSelectedTag(name)}
                 onSelectList={(name) => setSelectedList(name)}
                 onOpenAdd={() => {
@@ -787,6 +836,7 @@ export function App() {
                 setSelectedTag(name);
                 setActiveView("bookmarks");
               }}
+              onOpenReview={() => setActiveView("review")}
               onNotify={notify}
               onNsfwStatusChange={handleNsfwStatusChange}
             />
@@ -795,10 +845,26 @@ export function App() {
           {activeView === "lists" && (
             <ListsView
               lists={lists}
-              onRefresh={refreshMetadata}
-              onFilterByList={(name) => {
-                setSelectedList(name);
-                setActiveView("bookmarks");
+              allTags={tags}
+              activeListId={activeListId}
+              onSelectListId={setActiveListId}
+              onRefresh={async () => {
+                await Promise.all([refreshMetadata(), refreshBookmarks()]);
+              }}
+              onSelectBookmark={(b) => {
+                setSelectedBookmark(b);
+                if (!isMobileInspector && !fullBleed) {
+                  setInspectorOpen(true);
+                }
+              }}
+              onNotify={notify}
+            />
+          )}
+
+          {activeView === "review" && (
+            <ReviewQueueView
+              onRefreshMetadata={async () => {
+                await Promise.all([refreshMetadata(), refreshBookmarks()]);
               }}
               onNotify={notify}
             />

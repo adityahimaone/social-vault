@@ -232,3 +232,156 @@ func strconvI64(v int64) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
+
+func TestListsSmartListsTagsAndSocialDedupeAPI(t *testing.T) {
+	ts, _ := setupTestServer(t)
+
+	// 1. Canonicalization + cross-variant duplicate prevention for X and Threads
+	reqX, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/bookmarks", strings.NewReader(`{
+		"url": "https://twitter.com/alice/status/123456789?s=20",
+		"title": "Alice on X",
+		"description": "Go concurrency tips",
+		"tags": ["golang", "tools"]
+	}`))
+	reqX.Header.Set("Authorization", "Bearer vault-key")
+	reqX.Header.Set("Content-Type", "application/json")
+	respX, err := http.DefaultClient.Do(reqX)
+	if err != nil {
+		t.Fatalf("create X bookmark: %v", err)
+	}
+	var bmX db.Bookmark
+	_ = json.NewDecoder(respX.Body).Decode(&bmX)
+	respX.Body.Close()
+	if respX.StatusCode != http.StatusCreated || bmX.URL != "https://x.com/alice/status/123456789" {
+		t.Fatalf("expected canonical X URL, got status=%d bm=%+v", respX.StatusCode, bmX)
+	}
+
+	// Duplicate X save using x.com + /photo/1 + trailing slash -> 409
+	dupX, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/bookmarks", strings.NewReader(`{
+		"url": "https://x.com/alice/status/123456789/photo/1/"
+	}`))
+	dupX.Header.Set("Authorization", "Bearer vault-key")
+	dupX.Header.Set("Content-Type", "application/json")
+	dupXResp, _ := http.DefaultClient.Do(dupX)
+	dupXResp.Body.Close()
+	if dupXResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 for duplicate X URL variant, got %d", dupXResp.StatusCode)
+	}
+
+	// Threads canonicalization & dedupe
+	reqT, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/bookmarks", strings.NewReader(`{
+		"url": "https://threads.net/@bob/post/DD999xyz?xmt=abc",
+		"title": "Bob on Threads",
+		"description": "Design notes",
+		"tags": ["design"]
+	}`))
+	reqT.Header.Set("Authorization", "Bearer vault-key")
+	reqT.Header.Set("Content-Type", "application/json")
+	respT, _ := http.DefaultClient.Do(reqT)
+	var bmT db.Bookmark
+	_ = json.NewDecoder(respT.Body).Decode(&bmT)
+	respT.Body.Close()
+	if respT.StatusCode != http.StatusCreated || bmT.URL != "https://www.threads.com/@bob/post/DD999xyz" {
+		t.Fatalf("expected canonical Threads URL, got status=%d bm=%+v", respT.StatusCode, bmT)
+	}
+
+	dupT, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/bookmarks", strings.NewReader(`{
+		"url": "https://www.threads.com/bob/post/DD999xyz/"
+	}`))
+	dupT.Header.Set("Authorization", "Bearer vault-key")
+	dupT.Header.Set("Content-Type", "application/json")
+	dupTRsp, _ := http.DefaultClient.Do(dupT)
+	dupTRsp.Body.Close()
+	if dupTRsp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 for duplicate Threads URL variant, got %d", dupTRsp.StatusCode)
+	}
+
+	// 2. Manual list creation, rename, membership add/remove
+	createListReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/lists", strings.NewReader(`{
+		"name": "Dev Picks",
+		"description": "Curated posts"
+	}`))
+	createListReq.Header.Set("Authorization", "Bearer vault-key")
+	createListReq.Header.Set("Content-Type", "application/json")
+	createListResp, _ := http.DefaultClient.Do(createListReq)
+	var manualList db.List
+	_ = json.NewDecoder(createListResp.Body).Decode(&manualList)
+	createListResp.Body.Close()
+	if createListResp.StatusCode != http.StatusCreated || manualList.ID == 0 {
+		t.Fatalf("create list failed: status=%d list=%+v", createListResp.StatusCode, manualList)
+	}
+
+	addReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/lists/"+strconvI64(manualList.ID)+"/bookmarks", strings.NewReader(`{"bookmark_ids":[`+strconvI64(bmX.ID)+`,`+strconvI64(bmT.ID)+`]}`))
+	addReq.Header.Set("Authorization", "Bearer vault-key")
+	addReq.Header.Set("Content-Type", "application/json")
+	addResp, _ := http.DefaultClient.Do(addReq)
+	var addOut struct {
+		List  db.List `json:"list"`
+		Added int     `json:"added"`
+	}
+	_ = json.NewDecoder(addResp.Body).Decode(&addOut)
+	addResp.Body.Close()
+	if addResp.StatusCode != http.StatusOK || addOut.Added != 2 || addOut.List.Count != 2 {
+		t.Fatalf("unexpected add to list response: status=%d out=%+v", addResp.StatusCode, addOut)
+	}
+
+	delMemReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/lists/"+strconvI64(manualList.ID)+"/bookmarks/"+strconvI64(bmT.ID), nil)
+	delMemReq.Header.Set("Authorization", "Bearer vault-key")
+	delMemResp, _ := http.DefaultClient.Do(delMemReq)
+	delMemResp.Body.Close()
+	if delMemResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 removing bookmark from list, got %d", delMemResp.StatusCode)
+	}
+
+	// 3. Smart list creation & automatic membership
+	smartReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/lists", strings.NewReader(`{
+		"name": "Tools Smart",
+		"is_smart": true,
+		"rule": {"tags":["tools"]}
+	}`))
+	smartReq.Header.Set("Authorization", "Bearer vault-key")
+	smartReq.Header.Set("Content-Type", "application/json")
+	smartResp, _ := http.DefaultClient.Do(smartReq)
+	var smartList db.List
+	_ = json.NewDecoder(smartResp.Body).Decode(&smartList)
+	smartResp.Body.Close()
+	if smartResp.StatusCode != http.StatusCreated || !smartList.IsSmart || smartList.Count != 1 {
+		t.Fatalf("unexpected smart list: status=%d list=%+v", smartResp.StatusCode, smartList)
+	}
+
+	// 4. Tag rename & merge
+	tagsReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/tags", nil)
+	tagsReq.Header.Set("Authorization", "Bearer vault-key")
+	tagsResp, _ := http.DefaultClient.Do(tagsReq)
+	var tagsOut struct {
+		Items []db.Tag `json:"items"`
+	}
+	_ = json.NewDecoder(tagsResp.Body).Decode(&tagsOut)
+	tagsResp.Body.Close()
+	var golangID, toolsID int64
+	for _, tg := range tagsOut.Items {
+		if tg.Name == "golang" {
+			golangID = tg.ID
+		} else if tg.Name == "tools" {
+			toolsID = tg.ID
+		}
+	}
+
+	renReq, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/tags/"+strconvI64(golangID), strings.NewReader(`{"name":"go-lang"}`))
+	renReq.Header.Set("Authorization", "Bearer vault-key")
+	renReq.Header.Set("Content-Type", "application/json")
+	renResp, _ := http.DefaultClient.Do(renReq)
+	renResp.Body.Close()
+	if renResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 renaming tag, got %d", renResp.StatusCode)
+	}
+
+	mergeReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tags/merge", strings.NewReader(`{"source_id":`+strconvI64(golangID)+`,"target_id":`+strconvI64(toolsID)+`}`))
+	mergeReq.Header.Set("Authorization", "Bearer vault-key")
+	mergeReq.Header.Set("Content-Type", "application/json")
+	mergeResp, _ := http.DefaultClient.Do(mergeReq)
+	mergeResp.Body.Close()
+	if mergeResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 merging tags, got %d", mergeResp.StatusCode)
+	}
+}

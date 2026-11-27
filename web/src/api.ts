@@ -1,12 +1,18 @@
 import type {
   BackfillResult,
+  BatchTagReviewResult,
   Bookmark,
   ImportResult,
   List,
+  MergeTagsResult,
   NsfwStatus,
+  SmartListRule,
   Stats,
+  SuggestUntaggedResult,
   Tag,
   TaggingStatus,
+  TagReviewItem,
+  TagReviewListResponse,
 } from "./types";
 
 export type { BackfillResult, NsfwStatus, TaggingStatus } from "./types";
@@ -87,7 +93,15 @@ export const api = {
   stats: () => request<Stats>("/api/stats"),
 
   listBookmarks: (
-    params: { q?: string; archived?: string; tag?: string; list?: string; limit?: number; offset?: number },
+    params: {
+      q?: string;
+      archived?: string;
+      tag?: string;
+      list?: string;
+      untagged?: boolean;
+      limit?: number;
+      offset?: number;
+    },
     signal?: AbortSignal
   ) => {
     const sp = new URLSearchParams();
@@ -95,6 +109,7 @@ export const api = {
     if (params.archived && params.archived !== "all") sp.set("archived", params.archived);
     if (params.tag) sp.set("tag", params.tag);
     if (params.list) sp.set("list", params.list);
+    if (params.untagged) sp.set("untagged", "true");
     if (params.limit) sp.set("limit", String(params.limit));
     if (params.offset) sp.set("offset", String(params.offset));
     const qs = sp.toString();
@@ -145,6 +160,18 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
 
+  updateTag: (id: number, name: string) =>
+    request<Tag>(`/api/tags/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+
+  mergeTags: (sourceId: number, targetId: number) =>
+    request<MergeTagsResult>("/api/tags/merge", {
+      method: "POST",
+      body: JSON.stringify({ source_id: sourceId, target_id: targetId }),
+    }),
+
   deleteTag: (id: number) =>
     request<{ deleted: boolean }>(`/api/tags/${id}`, {
       method: "DELETE",
@@ -152,14 +179,46 @@ export const api = {
 
   listLists: () => request<{ items: List[] }>("/api/lists"),
 
-  createList: (name: string, description: string) =>
+  getList: (id: number, signal?: AbortSignal) => request<List>(`/api/lists/${id}`, { signal }),
+
+  createList: (payload: {
+    name: string;
+    description: string;
+    is_smart?: boolean;
+    rule?: SmartListRule;
+  }) =>
     request<List>("/api/lists", {
       method: "POST",
-      body: JSON.stringify({ name, description }),
+      body: JSON.stringify(payload),
+    }),
+
+  updateList: (
+    id: number,
+    payload: {
+      name?: string;
+      description?: string;
+      is_smart?: boolean;
+      rule?: SmartListRule;
+    }
+  ) =>
+    request<List>(`/api/lists/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
     }),
 
   deleteList: (id: number) =>
     request<{ deleted: boolean }>(`/api/lists/${id}`, {
+      method: "DELETE",
+    }),
+
+  addBookmarksToList: (listId: number, bookmarkIds: number[]) =>
+    request<{ list: List; added: number }>(`/api/lists/${listId}/bookmarks`, {
+      method: "POST",
+      body: JSON.stringify({ bookmark_ids: bookmarkIds }),
+    }),
+
+  removeBookmarkFromList: (listId: number, bookmarkId: number) =>
+    request<{ removed: boolean }>(`/api/lists/${listId}/bookmarks/${bookmarkId}`, {
       method: "DELETE",
     }),
 
@@ -180,6 +239,32 @@ export const api = {
     request<BackfillResult>("/api/tagging/backfill", {
       method: "POST",
       body: JSON.stringify(layers && layers.length > 0 ? { layers } : {}),
+    }),
+
+  listTagReview: (limit = 200, signal?: AbortSignal) =>
+    request<TagReviewListResponse>(`/api/tag-review?limit=${limit}`, { signal }),
+
+  applyTagReview: (id: number, tags?: string[]) =>
+    request<{ item: TagReviewItem; bookmark: Bookmark }>(`/api/tag-review/${id}/apply`, {
+      method: "POST",
+      body: JSON.stringify(tags && tags.length > 0 ? { tags } : {}),
+    }),
+
+  dismissTagReview: (id: number) =>
+    request<{ item: TagReviewItem }>(`/api/tag-review/${id}/dismiss`, {
+      method: "POST",
+    }),
+
+  batchTagReview: (action: "apply" | "dismiss", ids: number[]) =>
+    request<BatchTagReviewResult>("/api/tag-review/batch", {
+      method: "POST",
+      body: JSON.stringify({ action, ids }),
+    }),
+
+  suggestUntagged: (limit = 200) =>
+    request<SuggestUntaggedResult>("/api/tagging/suggest-untagged", {
+      method: "POST",
+      body: JSON.stringify({ limit }),
     }),
 
   nsfwStatus: (signal?: AbortSignal) =>

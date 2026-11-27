@@ -18,16 +18,18 @@ const (
 
 // TagReviewItem represents one queued Layer 3 tag suggestion row.
 type TagReviewItem struct {
-	ID            int64              `json:"id"`
-	BookmarkID    int64              `json:"bookmark_id"`
-	BookmarkTitle string             `json:"bookmark_title"`
-	BookmarkURL   string             `json:"bookmark_url"`
-	SuggestedTags []string           `json:"suggested_tags"`
-	JevScores     map[string]float64 `json:"jev_scores"`
-	Source        string             `json:"source"`
-	Status        string             `json:"status"`
-	CreatedAt     string             `json:"created_at"`
-	ResolvedAt    string             `json:"resolved_at,omitempty"`
+	ID                  int64              `json:"id"`
+	BookmarkID          int64              `json:"bookmark_id"`
+	BookmarkTitle       string             `json:"bookmark_title"`
+	BookmarkURL         string             `json:"bookmark_url"`
+	BookmarkDescription string             `json:"bookmark_description,omitempty"`
+	BookmarkSiteName    string             `json:"bookmark_site_name,omitempty"`
+	SuggestedTags       []string           `json:"suggested_tags"`
+	JevScores           map[string]float64 `json:"jev_scores"`
+	Source              string             `json:"source"`
+	Status              string             `json:"status"`
+	CreatedAt           string             `json:"created_at"`
+	ResolvedAt          string             `json:"resolved_at,omitempty"`
 }
 
 // EnqueueTagReview creates a pending review queue item for bookmarkID.
@@ -92,7 +94,7 @@ func (s *Store) EnqueueTagReview(ctx context.Context, bookmarkID int64, suggeste
 
 func (s *Store) getPendingTagReviewByBookmark(ctx context.Context, bookmarkID int64) (*TagReviewItem, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT q.id, q.bookmark_id, b.title, b.url, q.suggested_tags, q.jev_scores, q.source, q.status, q.created_at, q.resolved_at
+		SELECT q.id, q.bookmark_id, b.title, b.url, b.description, b.site_name, q.suggested_tags, q.jev_scores, q.source, q.status, q.created_at, q.resolved_at
 		FROM tag_review_queue q
 		JOIN bookmarks b ON b.id = q.bookmark_id
 		WHERE q.bookmark_id = ? AND q.status = 'pending'
@@ -110,7 +112,7 @@ func (s *Store) getPendingTagReviewByBookmark(ctx context.Context, bookmarkID in
 // GetTagReview fetches one review queue item joined with its bookmark title and URL.
 func (s *Store) GetTagReview(ctx context.Context, id int64) (*TagReviewItem, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT q.id, q.bookmark_id, b.title, b.url, q.suggested_tags, q.jev_scores, q.source, q.status, q.created_at, q.resolved_at
+		SELECT q.id, q.bookmark_id, b.title, b.url, b.description, b.site_name, q.suggested_tags, q.jev_scores, q.source, q.status, q.created_at, q.resolved_at
 		FROM tag_review_queue q
 		JOIN bookmarks b ON b.id = q.bookmark_id
 		WHERE q.id = ?
@@ -150,7 +152,7 @@ func (s *Store) ListPendingTagReviewsFiltered(ctx context.Context, limit int, ex
 	}
 
 	query := fmt.Sprintf(`
-		SELECT q.id, q.bookmark_id, b.title, b.url, q.suggested_tags, q.jev_scores, q.source, q.status, q.created_at, q.resolved_at
+		SELECT q.id, q.bookmark_id, b.title, b.url, b.description, b.site_name, q.suggested_tags, q.jev_scores, q.source, q.status, q.created_at, q.resolved_at
 		FROM tag_review_queue q
 		JOIN bookmarks b ON b.id = q.bookmark_id
 		WHERE q.status = 'pending'
@@ -182,6 +184,12 @@ func (s *Store) ListPendingTagReviewsFiltered(ctx context.Context, limit int, ex
 // ApplyTagReview merges the pending suggested tags into the bookmark without removing
 // any existing tags, and marks the queue item applied.
 func (s *Store) ApplyTagReview(ctx context.Context, id int64) (*TagReviewItem, *Bookmark, error) {
+	return s.ApplyTagReviewWithTags(ctx, id, nil, false)
+}
+
+// ApplyTagReviewWithTags merges either overrideTags (when non-empty) or the item's
+// suggested tags into the bookmark without removing existing tags, and marks the row applied.
+func (s *Store) ApplyTagReviewWithTags(ctx context.Context, id int64, overrideTags []string, excludeNsfw bool) (*TagReviewItem, *Bookmark, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("begin tx: %w", err)
@@ -200,14 +208,6 @@ func (s *Store) ApplyTagReview(ctx context.Context, id int64) (*TagReviewItem, *
 			return nil, nil, ErrNotFound
 		}
 		return nil, nil, fmt.Errorf("load tag review: %w", err)
-	}
-	if status != TagReviewStatusPending {
-		return nil, nil, ErrAlreadyResolved
-	}
-
-	var suggested []string
-	if err := json.Unmarshal([]byte(rawSuggested), &suggested); err != nil {
-		return nil, nil, fmt.Errorf("decode suggested_tags: %w", err)
 	}
 
 	existingRows, err := tx.QueryContext(ctx, `
@@ -234,6 +234,37 @@ func (s *Store) ApplyTagReview(ctx context.Context, id int64) (*TagReviewItem, *
 		return nil, nil, fmt.Errorf("iter existing tags: %w", err)
 	}
 	_ = existingRows.Close()
+
+	if excludeNsfw {
+		for _, t := range existing {
+			if strings.EqualFold(t, "nsfw") {
+				return nil, nil, ErrNotFound
+			}
+		}
+	}
+
+	if status != TagReviewStatusPending {
+		return nil, nil, ErrAlreadyResolved
+	}
+
+	var suggested []string
+	if len(overrideTags) > 0 {
+		suggested = dedupeTrimmedTags(overrideTags)
+	} else {
+		if err := json.Unmarshal([]byte(rawSuggested), &suggested); err != nil {
+			return nil, nil, fmt.Errorf("decode suggested_tags: %w", err)
+		}
+	}
+	if len(suggested) == 0 {
+		return nil, nil, fmt.Errorf("%w: at least one tag is required to apply", ErrInvalidInput)
+	}
+	if excludeNsfw {
+		for _, t := range suggested {
+			if strings.EqualFold(t, "nsfw") {
+				return nil, nil, fmt.Errorf("%w: nsfw tag is locked; unlock before assigning it", ErrInvalidInput)
+			}
+		}
+	}
 
 	merged := dedupeTrimmedTags(append(existing, suggested...))
 	now := nowUTC()
@@ -268,13 +299,33 @@ func (s *Store) ApplyTagReview(ctx context.Context, id int64) (*TagReviewItem, *
 
 // DismissTagReview marks a pending queue item dismissed without altering bookmark tags.
 func (s *Store) DismissTagReview(ctx context.Context, id int64) (*TagReviewItem, error) {
+	return s.DismissTagReviewFiltered(ctx, id, false)
+}
+
+// DismissTagReviewFiltered marks a pending queue item dismissed, hiding NSFW bookmarks when locked.
+func (s *Store) DismissTagReviewFiltered(ctx context.Context, id int64, excludeNsfw bool) (*TagReviewItem, error) {
+	var bookmarkID int64
 	var status string
-	err := s.db.QueryRowContext(ctx, `SELECT status FROM tag_review_queue WHERE id = ?`, id).Scan(&status)
+	err := s.db.QueryRowContext(ctx, `SELECT bookmark_id, status FROM tag_review_queue WHERE id = ?`, id).Scan(&bookmarkID, &status)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("load tag review status: %w", err)
+	}
+	if excludeNsfw {
+		var hasNsfw int
+		err := s.db.QueryRowContext(ctx, `
+			SELECT 1 FROM bookmark_tags bt
+			JOIN tags t ON t.id = bt.tag_id
+			WHERE bt.bookmark_id = ? AND lower(t.name) = 'nsfw'
+			LIMIT 1
+		`, bookmarkID).Scan(&hasNsfw)
+		if err == nil {
+			return nil, ErrNotFound
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("check nsfw review bookmark: %w", err)
+		}
 	}
 	if status != TagReviewStatusPending {
 		return nil, ErrAlreadyResolved
@@ -301,8 +352,22 @@ func (s *Store) DismissTagReview(ctx context.Context, id int64) (*TagReviewItem,
 
 // CountPendingTagReviews returns the number of pending rows in tag_review_queue.
 func (s *Store) CountPendingTagReviews(ctx context.Context) (int, error) {
+	return s.CountPendingTagReviewsFiltered(ctx, false)
+}
+
+// CountPendingTagReviewsFiltered returns pending review queue rows, optionally excluding NSFW bookmarks.
+func (s *Store) CountPendingTagReviewsFiltered(ctx context.Context, excludeNsfw bool) (int, error) {
+	extraWhere := ""
+	if excludeNsfw {
+		extraWhere = `AND NOT EXISTS (
+			SELECT 1 FROM bookmark_tags bt_nsfw
+			JOIN tags t_nsfw ON t_nsfw.id = bt_nsfw.tag_id
+			WHERE bt_nsfw.bookmark_id = q.bookmark_id AND lower(t_nsfw.name) = 'nsfw'
+		)`
+	}
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM tag_review_queue q WHERE q.status = 'pending' %s`, extraWhere)
 	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tag_review_queue WHERE status = 'pending'`).Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(ctx, query).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count pending tag reviews: %w", err)
 	}
 	return count, nil
@@ -374,6 +439,56 @@ func (s *Store) ListUntaggedBookmarksForBackfill(ctx context.Context, limit int)
 	return items, nil
 }
 
+// ListUntaggedBookmarksWithoutPendingReview returns bookmarks with zero tags and no pending review queue row.
+func (s *Store) ListUntaggedBookmarksWithoutPendingReview(ctx context.Context, limit int) ([]Bookmark, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT b.id, b.url, b.title, b.description, b.notes, b.favicon_url, b.image_url, b.site_name, b.source, b.archived, b.created_at, b.updated_at
+		FROM bookmarks b
+		WHERE NOT EXISTS (
+			SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id
+		)
+		AND NOT EXISTS (
+			SELECT 1 FROM tag_review_queue q WHERE q.bookmark_id = b.id AND q.status = 'pending'
+		)
+		ORDER BY b.created_at DESC, b.id DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list untagged bookmarks without pending review: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]Bookmark, 0)
+	for rows.Next() {
+		b, err := scanBookmark(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan untagged bookmark: %w", err)
+		}
+		items = append(items, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iter untagged bookmarks: %w", err)
+	}
+
+	if len(items) > 0 {
+		ptrs := make([]*Bookmark, len(items))
+		for i := range items {
+			ptrs[i] = &items[i]
+		}
+		if err := s.hydrateBookmarks(ctx, ptrs); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
 func scanTagReviewItem(r rowScanner) (TagReviewItem, error) {
 	var item TagReviewItem
 	var rawTags, rawScores string
@@ -383,6 +498,8 @@ func scanTagReviewItem(r rowScanner) (TagReviewItem, error) {
 		&item.BookmarkID,
 		&item.BookmarkTitle,
 		&item.BookmarkURL,
+		&item.BookmarkDescription,
+		&item.BookmarkSiteName,
 		&rawTags,
 		&rawScores,
 		&item.Source,

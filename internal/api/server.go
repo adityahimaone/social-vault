@@ -64,19 +64,26 @@ func (s *Server) routes() {
 
 	s.mux.Handle("GET /api/tags", protect(http.HandlerFunc(s.handleListTags)))
 	s.mux.Handle("POST /api/tags", protect(http.HandlerFunc(s.handleCreateTag)))
+	s.mux.Handle("PATCH /api/tags/{id}", protect(http.HandlerFunc(s.handleRenameTag)))
+	s.mux.Handle("POST /api/tags/merge", protect(http.HandlerFunc(s.handleMergeTags)))
 	s.mux.Handle("DELETE /api/tags/{id}", protect(http.HandlerFunc(s.handleDeleteTag)))
 
 	s.mux.Handle("GET /api/lists", protect(http.HandlerFunc(s.handleListLists)))
 	s.mux.Handle("POST /api/lists", protect(http.HandlerFunc(s.handleCreateList)))
+	s.mux.Handle("GET /api/lists/{id}", protect(http.HandlerFunc(s.handleGetList)))
 	s.mux.Handle("PATCH /api/lists/{id}", protect(http.HandlerFunc(s.handleUpdateList)))
 	s.mux.Handle("DELETE /api/lists/{id}", protect(http.HandlerFunc(s.handleDeleteList)))
+	s.mux.Handle("POST /api/lists/{id}/bookmarks", protect(http.HandlerFunc(s.handleAddListBookmarks)))
+	s.mux.Handle("DELETE /api/lists/{id}/bookmarks/{bookmarkId}", protect(http.HandlerFunc(s.handleRemoveListBookmark)))
 
 	s.mux.Handle("POST /api/import", protect(http.HandlerFunc(s.handleImport)))
 
 	s.mux.Handle("GET /api/tag-review", protect(http.HandlerFunc(s.handleListTagReview)))
+	s.mux.Handle("POST /api/tag-review/batch", protect(http.HandlerFunc(s.handleBatchTagReview)))
 	s.mux.Handle("POST /api/tag-review/{id}/apply", protect(http.HandlerFunc(s.handleApplyTagReview)))
 	s.mux.Handle("POST /api/tag-review/{id}/dismiss", protect(http.HandlerFunc(s.handleDismissTagReview)))
 	s.mux.Handle("POST /api/tagging/backfill", protect(http.HandlerFunc(s.handleBackfillTagging)))
+	s.mux.Handle("POST /api/tagging/suggest-untagged", protect(http.HandlerFunc(s.handleSuggestUntagged)))
 	s.mux.Handle("GET /api/tagging/status", protect(http.HandlerFunc(s.handleTaggingStatus)))
 
 	s.mux.Handle("POST /api/nsfw/unlock", protect(http.HandlerFunc(s.handleNsfwUnlock)))

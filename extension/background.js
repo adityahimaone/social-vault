@@ -157,6 +157,8 @@ importScripts("vault-api.js");
     if (message.type === "BULK_SAVE_BOOKMARK") {
       globalThis.SocialVaultAPI.saveBookmark({
         url: message.url,
+        title: message.title,
+        description: message.description,
         source: message.source || "extension-bulk"
       })
         .then(function (result) {

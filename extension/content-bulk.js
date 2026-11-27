@@ -28,6 +28,7 @@
     collapsed: false,
     autoScroll: true,
     detectedUrls: [],
+    metadataByUrl: Object.create(null),
     phase: "idle", // idle | scrolling | saving | done | stopped | error
     collected: 0,
     total: 0,
@@ -555,6 +556,28 @@
     return raw;
   }
 
+  function collectPostMetadata(extractOpts) {
+    if (!activeRoute || typeof extractor.extractPostMetadataMap !== "function") {
+      return;
+    }
+    var nextMeta = extractor.extractPostMetadataMap(
+      activeRoute.platform,
+      document,
+      window.location.origin,
+      extractOpts
+    );
+    var keys = Object.keys(nextMeta);
+    for (var i = 0; i < keys.length; i++) {
+      var u = keys[i];
+      var prev = state.metadataByUrl[u];
+      var incoming = nextMeta[u];
+      state.metadataByUrl[u] = {
+        title: (prev && prev.title) || incoming.title || "",
+        description: (prev && prev.description) || incoming.description || ""
+      };
+    }
+  }
+
   function scanVisibleUrls() {
     if (!activeRoute) {
       return [];
@@ -562,6 +585,7 @@
     var found = extractor.extractPostUrls(activeRoute.platform, document, window.location.origin);
     var merged = extractor.mergeUniqueUrls(state.detectedUrls, found, MAX_POSTS);
     state.detectedUrls = merged.urls;
+    collectPostMetadata();
     return found;
   }
 
@@ -753,6 +777,7 @@
         scrollWaitMs: 900,
         maxStagnantRounds: 3,
         extractUrls: function (extractOpts) {
+          collectPostMetadata(extractOpts);
           return extractor.extractPostUrls(routeSnapshot.platform, document, window.location.origin, extractOpts);
         },
         scrollStep: function () {
@@ -767,9 +792,12 @@
           };
         },
         saveUrl: function (postUrl) {
+          var meta = state.metadataByUrl[postUrl] || {};
           return sendRuntimeMessage({
             type: "BULK_SAVE_BOOKMARK",
             url: postUrl,
+            title: meta.title || "",
+            description: meta.description || "",
             source: routeSnapshot.source
           });
         },
@@ -1104,6 +1132,7 @@
 
   function resetSessionState() {
     state.detectedUrls = [];
+    state.metadataByUrl = Object.create(null);
     state.phase = "idle";
     state.collected = 0;
     state.total = 0;

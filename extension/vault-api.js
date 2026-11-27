@@ -253,6 +253,10 @@
         if (title) {
           payload.title = title;
         }
+        var description = String((input && input.description) || "").trim();
+        if (description) {
+          payload.description = description;
+        }
         var notes = String((input && input.notes) || "").trim();
         if (notes) {
           payload.notes = notes;

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,15 @@ type BackfillResult struct {
 	Queued      int `json:"queued"`
 	Skipped     int `json:"skipped"`
 	Failed      int `json:"failed"`
+}
+
+// SuggestResult summarizes one POST /api/tagging/suggest-untagged run.
+type SuggestResult struct {
+	Processed int                `json:"processed"`
+	Queued    int                `json:"queued"`
+	Skipped   int                `json:"skipped"`
+	Failed    int                `json:"failed"`
+	Items     []db.TagReviewItem `json:"items"`
 }
 
 // ActiveJevJob describes one in-flight background Layer 2 Jev classification job.
@@ -399,6 +409,102 @@ func (s *Service) Backfill(ctx context.Context, limit int, layers ...string) (ou
 		}
 
 		if !ruleMatched && jevApplied == 0 && !jevQueued {
+			out.Skipped++
+		}
+	}
+
+	return out, nil
+}
+
+// SuggestUntagged runs Jev over untagged bookmarks without pending review rows
+// and enqueues all suggestions >= JevReviewThreshold (0.5) into tag_review_queue
+// without auto-applying any tags to bookmarks.
+func (s *Service) SuggestUntagged(ctx context.Context, limit int) (SuggestResult, error) {
+	if !s.JevEnabled() {
+		return SuggestResult{}, ErrJevDisabled
+	}
+
+	s.mu.Lock()
+	if s.lastBackfill.Running {
+		s.mu.Unlock()
+		return SuggestResult{}, ErrBackfillRunning
+	}
+	s.lastBackfill.Running = true
+	s.lastBackfill.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	s.lastBackfill.FinishedAt = ""
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		s.lastBackfill.Running = false
+		s.lastBackfill.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		s.mu.Unlock()
+	}()
+
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > MaxBackfillLimit {
+		limit = MaxBackfillLimit
+	}
+
+	bookmarks, err := s.store.ListUntaggedBookmarksWithoutPendingReview(ctx, limit)
+	if err != nil {
+		return SuggestResult{}, err
+	}
+
+	out := SuggestResult{
+		Items: make([]db.TagReviewItem, 0),
+	}
+
+	for i := range bookmarks {
+		b := &bookmarks[i]
+		out.Processed++
+
+		res, jerr := s.jev.Classify(ctx, Input{
+			URL:         b.URL,
+			Title:       b.Title,
+			Description: b.Description,
+			SiteName:    b.SiteName,
+		})
+		if jerr != nil {
+			log.Printf("tagging: suggest-untagged jev failed for bookmark %d: %v", b.ID, jerr)
+			out.Failed++
+			continue
+		}
+
+		suggested := make([]string, 0)
+		scores := make(map[string]float64)
+		for tag, score := range res.AllScores {
+			if score >= JevReviewThreshold {
+				suggested = append(suggested, tag)
+				scores[tag] = score
+			}
+		}
+
+		if len(suggested) == 0 {
+			out.Skipped++
+			continue
+		}
+
+		sort.Slice(suggested, func(a, b int) bool {
+			sa, sb := scores[suggested[a]], scores[suggested[b]]
+			if sa != sb {
+				return sa > sb
+			}
+			return suggested[a] < suggested[b]
+		})
+
+		item, created, qerr := s.store.EnqueueTagReview(ctx, b.ID, suggested, scores, "jev")
+		if qerr != nil {
+			log.Printf("tagging: suggest-untagged enqueue failed for bookmark %d: %v", b.ID, qerr)
+			out.Failed++
+			continue
+		}
+		if created && item != nil {
+			out.Queued++
+			out.Items = append(out.Items, *item)
+		} else {
 			out.Skipped++
 		}
 	}

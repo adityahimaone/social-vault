@@ -613,3 +613,93 @@ func TestBackfillLayersAndGuardsAPI(t *testing.T) {
 		}
 	})
 }
+
+func TestSuggestUntaggedAndBatchReviewAPI(t *testing.T) {
+	jevSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			State struct {
+				Title string `json:"title"`
+			} `json:"state"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(req.State.Title, "Alpha") {
+			_, _ = w.Write([]byte(`{"model":"jev-1.13.0","answers":{"ai":{"type":"noul","noul":0.93},"tools":{"type":"noul","noul":0.64}}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"model":"jev-1.13.0","answers":{"design":{"type":"noul","noul":0.71}}}`))
+	}))
+	defer jevSrv.Close()
+
+	ts, store, _ := setupTaggingTestServer(t, tagging.NewJevClientWithOptions("stub-key", jevSrv.URL, nil))
+	ctx := context.Background()
+
+	bm1, err := store.CreateBookmark(ctx, db.CreateBookmarkInput{
+		URL:   "https://example.org/alpha",
+		Title: "Alpha Untapped Tool",
+	})
+	if err != nil {
+		t.Fatalf("create bm1: %v", err)
+	}
+	bm2, err := store.CreateBookmark(ctx, db.CreateBookmarkInput{
+		URL:   "https://example.org/beta",
+		Title: "Beta Design Sketch",
+	})
+	if err != nil {
+		t.Fatalf("create bm2: %v", err)
+	}
+
+	// Suggest untagged must queue suggestions (>=0.5, including >=0.8) WITHOUT auto-applying tags.
+	sugResp := doAPIRequest(t, http.MethodPost, ts.URL+"/api/tagging/suggest-untagged", `{"limit":50}`)
+	var sugOut tagging.SuggestResult
+	_ = json.NewDecoder(sugResp.Body).Decode(&sugOut)
+	sugResp.Body.Close()
+	if sugResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on suggest-untagged, got %d", sugResp.StatusCode)
+	}
+	if sugOut.Processed != 2 || sugOut.Queued != 2 || len(sugOut.Items) != 2 {
+		t.Fatalf("unexpected suggest-untagged output: %+v", sugOut)
+	}
+
+	reloaded1, _ := store.GetBookmark(ctx, bm1.ID)
+	reloaded2, _ := store.GetBookmark(ctx, bm2.ID)
+	if len(reloaded1.Tags) != 0 || len(reloaded2.Tags) != 0 {
+		t.Fatalf("expected zero auto-applied tags before review, got bm1=%+v bm2=%+v", reloaded1.Tags, reloaded2.Tags)
+	}
+
+	// Apply bm1 with subset override ["tools"] instead of ["ai", "tools"]
+	var alphaItemID, betaItemID int64
+	for _, it := range sugOut.Items {
+		if it.BookmarkID == bm1.ID {
+			alphaItemID = it.ID
+		} else if it.BookmarkID == bm2.ID {
+			betaItemID = it.ID
+		}
+	}
+
+	appResp := doAPIRequest(t, http.MethodPost, ts.URL+"/api/tag-review/"+strconvI64(alphaItemID)+"/apply", `{"tags":["tools"]}`)
+	var appOut struct {
+		Bookmark db.Bookmark `json:"bookmark"`
+	}
+	_ = json.NewDecoder(appResp.Body).Decode(&appOut)
+	appResp.Body.Close()
+	if appResp.StatusCode != http.StatusOK || len(appOut.Bookmark.Tags) != 1 || appOut.Bookmark.Tags[0].Name != "tools" {
+		t.Fatalf("expected subset apply [tools], got status=%d bm=%+v", appResp.StatusCode, appOut.Bookmark)
+	}
+
+	// Batch apply remaining item(s)
+	batchResp := doAPIRequest(t, http.MethodPost, ts.URL+"/api/tag-review/batch", `{"action":"apply","ids":[`+strconvI64(betaItemID)+`]}`)
+	var batchOut struct {
+		Succeeded int `json:"succeeded"`
+	}
+	_ = json.NewDecoder(batchResp.Body).Decode(&batchOut)
+	batchResp.Body.Close()
+	if batchResp.StatusCode != http.StatusOK || batchOut.Succeeded != 1 {
+		t.Fatalf("expected batch apply succeeded=1, got status=%d out=%+v", batchResp.StatusCode, batchOut)
+	}
+
+	reloaded2After, _ := store.GetBookmark(ctx, bm2.ID)
+	if len(reloaded2After.Tags) != 1 || reloaded2After.Tags[0].Name != "design" {
+		t.Fatalf("expected bm2 tagged [design] after batch apply, got %+v", reloaded2After.Tags)
+	}
+}

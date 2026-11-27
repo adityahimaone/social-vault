@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { Hash, Loader2, Lock, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Edit3, GitMerge, Hash, Inbox, Loader2, Lock, Plus, Sparkles, Trash2 } from "lucide-react";
 import { api, ApiError, type NsfwStatus, type TaggingStatus } from "../api";
 import type { Tag } from "../types";
 
@@ -37,6 +37,7 @@ interface TagsViewProps {
   tags: Tag[];
   onRefresh: () => Promise<void>;
   onFilterByTag: (tagName: string) => void;
+  onOpenReview: () => void;
   onNotify: (msg: string, tone: "success" | "error" | "info") => void;
   onNsfwStatusChange?: (status: NsfwStatus) => void;
 }
@@ -45,6 +46,7 @@ export function TagsView({
   tags,
   onRefresh,
   onFilterByTag,
+  onOpenReview,
   onNotify,
   onNsfwStatusChange,
 }: TagsViewProps) {
@@ -57,6 +59,12 @@ export function TagsView({
   const [nsfwStatus, setNsfwStatus] = useState<NsfwStatus | null>(null);
   const [nsfwPassword, setNsfwPassword] = useState("");
   const [nsfwBusy, setNsfwBusy] = useState(false);
+
+  const [editingTagId, setEditingTagId] = useState<number | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [mergingTagId, setMergingTagId] = useState<number | null>(null);
+  const [mergeTargetId, setMergeTargetId] = useState<number>(0);
+
   const nsfwInputRef = useRef<HTMLInputElement | null>(null);
   const onNsfwStatusChangeRef = useRef(onNsfwStatusChange);
   onNsfwStatusChangeRef.current = onNsfwStatusChange;
@@ -110,6 +118,37 @@ export function TagsView({
     }
   }
 
+  async function handleRenameSubmit(e: FormEvent, tag: Tag) {
+    e.preventDefault();
+    const trimmed = renameDraft.trim();
+    if (!trimmed) return;
+    try {
+      await api.updateTag(tag.id, trimmed);
+      setEditingTagId(null);
+      await onRefresh();
+      onNotify(`Renamed #${tag.name} to #${trimmed}`, "success");
+    } catch (err) {
+      onNotify(err instanceof ApiError ? err.message : "Failed to rename tag", "error");
+    }
+  }
+
+  async function handleMergeSubmit(e: FormEvent, sourceTag: Tag) {
+    e.preventDefault();
+    if (!mergeTargetId || mergeTargetId === sourceTag.id) return;
+    try {
+      const res = await api.mergeTags(sourceTag.id, mergeTargetId);
+      setMergingTagId(null);
+      setMergeTargetId(0);
+      await onRefresh();
+      onNotify(
+        `Merged #${sourceTag.name} into #${res.merged_into.name} (${res.moved_bookmarks} bookmarks updated)`,
+        "success"
+      );
+    } catch (err) {
+      onNotify(err instanceof ApiError ? err.message : "Failed to merge tags", "error");
+    }
+  }
+
   async function handleDelete(tag: Tag) {
     try {
       await api.deleteTag(tag.id);
@@ -122,6 +161,7 @@ export function TagsView({
   }
 
   const untaggedCount = taggingStatus?.untagged_count ?? 0;
+  const pendingReviewCount = taggingStatus?.pending_review ?? 0;
   const isBackfillRunning = backfilling || Boolean(taggingStatus?.last_backfill?.running);
 
   async function handleBackfill() {
@@ -194,7 +234,7 @@ export function TagsView({
             Tags
           </h1>
           <p className="panel-subtitle">
-            Organize bookmarks with lightweight labels. Click any tag to filter your vault.
+            Organize, rename, or merge tags. Click any tag to filter your vault.
           </p>
         </div>
         <div className="panel-header-actions">
@@ -238,7 +278,7 @@ export function TagsView({
               Auto-tagging
             </h2>
             <p className="autotag-subtitle">
-              Jalankan auto-tagging pada bookmark yang belum punya tag.
+              Jalankan auto-tagging pada bookmark yang belum punya tag, atau buka Review Queue.
             </p>
           </div>
           <div className="autotag-badges">
@@ -296,6 +336,11 @@ export function TagsView({
                 Tag ulang yang belum ber-tag
               </>
             )}
+          </button>
+
+          <button type="button" className="btn btn-secondary" onClick={onOpenReview}>
+            <Inbox size={15} aria-hidden="true" />
+            Buka Review Queue ({pendingReviewCount})
           </button>
         </div>
       </div>
@@ -356,31 +401,138 @@ export function TagsView({
               </button>
             </div>
           )}
-          {tags.map((tag) => (
-            <div key={tag.id} className="entity-card">
-              <button
-                type="button"
-                className="entity-card-btn"
-                onClick={() => onFilterByTag(tag.name)}
-              >
-                <span className="entity-card-title">
-                  <Hash size={15} aria-hidden="true" className="entity-card-icon" />
-                  <span className="entity-card-name">{tag.name}</span>
-                </span>
-                <span className="entity-card-meta tabular-nums">
-                  {tag.count ?? 0} bookmarks
-                </span>
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-icon btn-icon-sm"
-                onClick={() => handleDelete(tag)}
-                aria-label={`Delete tag ${tag.name}`}
-              >
-                <Trash2 size={15} aria-hidden="true" />
-              </button>
-            </div>
-          ))}
+          {tags.map((tag) => {
+            const isRenaming = editingTagId === tag.id;
+            const isMerging = mergingTagId === tag.id;
+            const mergeCandidates = tags.filter((other) => other.id !== tag.id);
+
+            return (
+              <div key={tag.id} className="entity-card entity-card-stack">
+                {isRenaming ? (
+                  <form onSubmit={(e) => handleRenameSubmit(e, tag)} className="entity-inline-edit">
+                    <input
+                      type="text"
+                      className="input"
+                      value={renameDraft}
+                      onChange={(e) => setRenameDraft(e.target.value)}
+                      aria-label={`Rename tag ${tag.name}`}
+                      autoFocus
+                      required
+                    />
+                    <div className="entity-inline-actions">
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-compact"
+                        onClick={() => setEditingTagId(null)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="btn btn-primary btn-compact"
+                        disabled={!renameDraft.trim()}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </form>
+                ) : isMerging ? (
+                  <form onSubmit={(e) => handleMergeSubmit(e, tag)} className="entity-inline-edit">
+                    <span className="entity-card-meta">
+                      Gabungkan #{tag.name} ke tag:
+                    </span>
+                    <select
+                      className="select"
+                      value={mergeTargetId}
+                      onChange={(e) => setMergeTargetId(Number(e.target.value))}
+                      aria-label={`Merge ${tag.name} into`}
+                    >
+                      <option value={0}>Pilih tag tujuan...</option>
+                      {mergeCandidates.map((cand) => (
+                        <option key={cand.id} value={cand.id}>
+                          #{cand.name} ({cand.count ?? 0})
+                        </option>
+                      ))}
+                    </select>
+                    <div className="entity-inline-actions">
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-compact"
+                        onClick={() => {
+                          setMergingTagId(null);
+                          setMergeTargetId(0);
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="btn btn-primary btn-compact"
+                        disabled={!mergeTargetId}
+                      >
+                        Merge
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="entity-card-top">
+                    <button
+                      type="button"
+                      className="entity-card-btn"
+                      onClick={() => onFilterByTag(tag.name)}
+                    >
+                      <span className="entity-card-title">
+                        <Hash size={15} aria-hidden="true" className="entity-card-icon" />
+                        <span className="entity-card-name">{tag.name}</span>
+                      </span>
+                      <span className="entity-card-meta tabular-nums">
+                        {tag.count ?? 0} bookmarks
+                      </span>
+                    </button>
+                    <div className="entity-card-actions">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-icon btn-icon-sm"
+                        onClick={() => {
+                          setMergingTagId(null);
+                          setEditingTagId(tag.id);
+                          setRenameDraft(tag.name);
+                        }}
+                        aria-label={`Rename tag ${tag.name}`}
+                        title="Rename tag"
+                      >
+                        <Edit3 size={14} aria-hidden="true" />
+                      </button>
+                      {mergeCandidates.length > 0 && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-icon btn-icon-sm"
+                          onClick={() => {
+                            setEditingTagId(null);
+                            setMergingTagId(tag.id);
+                            setMergeTargetId(mergeCandidates[0]?.id ?? 0);
+                          }}
+                          aria-label={`Merge tag ${tag.name}`}
+                          title="Gabung ke tag lain"
+                        >
+                          <GitMerge size={14} aria-hidden="true" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-icon btn-icon-sm"
+                        onClick={() => handleDelete(tag)}
+                        aria-label={`Delete tag ${tag.name}`}
+                        title="Delete tag"
+                      >
+                        <Trash2 size={14} aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </section>

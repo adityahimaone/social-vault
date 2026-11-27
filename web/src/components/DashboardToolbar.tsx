@@ -40,6 +40,7 @@ interface DashboardToolbarProps {
   librarySection: LibrarySection;
   selectedTag: string;
   selectedList: string;
+  activeListName?: string | null;
   visibleCount: number;
   totalCount: number;
   searchInput: string;
@@ -102,6 +103,7 @@ export function DashboardToolbar({
   librarySection,
   selectedTag,
   selectedList,
+  activeListName,
   visibleCount,
   totalCount,
   searchInput,
@@ -142,14 +144,16 @@ export function DashboardToolbar({
     activeView === "tags"
       ? "Tags"
       : activeView === "lists"
-        ? "Lists"
-        : activeView === "import"
-          ? "Import"
-          : selectedList
-            ? selectedList
-            : selectedTag
-              ? `#${selectedTag}`
-              : SECTION_LABELS[librarySection];
+        ? activeListName || "Lists"
+        : activeView === "review"
+          ? "Review Queue"
+          : activeView === "import"
+            ? "Import"
+            : selectedList
+              ? selectedList
+              : selectedTag
+                ? `#${selectedTag}`
+                : SECTION_LABELS[librarySection];
 
   const activeFilterCount =
     (archivedFilter !== "all" ? 1 : 0) +

@@ -5,10 +5,21 @@ export interface Tag {
   created_at?: string;
 }
 
+export interface SmartListRule {
+  tags?: string[];
+  tag_mode?: "any" | "all";
+  query?: string;
+  domain?: string;
+  archived?: "" | "all" | "false" | "true";
+  untagged?: boolean;
+}
+
 export interface List {
   id: number;
   name: string;
   description: string;
+  is_smart?: boolean;
+  rule?: SmartListRule;
   count?: number;
   created_at?: string;
 }
@@ -86,12 +97,54 @@ export interface TaggingStatus {
   untagged_count: number;
 }
 
+export interface TagReviewItem {
+  id: number;
+  bookmark_id: number;
+  bookmark_title: string;
+  bookmark_url: string;
+  bookmark_description?: string;
+  bookmark_site_name?: string;
+  suggested_tags: string[];
+  jev_scores: Record<string, number>;
+  source: string;
+  status: "pending" | "applied" | "dismissed";
+  created_at: string;
+  resolved_at?: string;
+}
+
+export interface TagReviewListResponse {
+  items: TagReviewItem[];
+  total: number;
+}
+
+export interface BatchTagReviewResult {
+  action: "apply" | "dismiss";
+  succeeded: number;
+  skipped: number;
+  failed: number;
+  processed_ids: number[];
+}
+
+export interface SuggestUntaggedResult {
+  processed: number;
+  queued: number;
+  skipped: number;
+  failed: number;
+  items: TagReviewItem[];
+}
+
+export interface MergeTagsResult {
+  merged_into: Tag;
+  moved_bookmarks: number;
+  deleted_tag_id: number;
+}
+
 export interface NsfwStatus {
   configured: boolean;
   locked: boolean;
 }
 
-export type ActiveView = "bookmarks" | "tags" | "lists" | "import";
+export type ActiveView = "bookmarks" | "tags" | "lists" | "review" | "import";
 export type ArchivedFilter = "all" | "false" | "true";
 export type LibrarySection = "all" | "favorites" | "untagged" | "recent" | "archived";
 export type SmartFilter = "this_week" | "with_notes" | "has_media" | "unlisted";

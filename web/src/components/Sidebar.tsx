@@ -8,6 +8,7 @@ import {
   FolderOpen,
   Hash,
   Image as ImageIcon,
+  Inbox,
   Lock,
   LogOut,
   Moon,
@@ -34,8 +35,11 @@ interface SidebarProps {
   onToggleSmartFilter: (filter: SmartFilter) => void;
   selectedTag: string;
   selectedList: string;
+  activeListId: number | null;
+  pendingReviewCount: number;
   onSelectTagFilter: (tagName: string) => void;
   onSelectListFilter: (listName: string) => void;
+  onSelectListDetail: (listId: number | null) => void;
   searchInput: string;
   onSearchChange: (val: string) => void;
   searchInputRef: RefObject<HTMLInputElement | null>;
@@ -73,8 +77,11 @@ export function Sidebar({
   onToggleSmartFilter,
   selectedTag,
   selectedList,
+  activeListId,
+  pendingReviewCount,
   onSelectTagFilter,
   onSelectListFilter,
+  onSelectListDetail,
   searchInput,
   onSearchChange,
   searchInputRef,
@@ -266,6 +273,19 @@ export function Sidebar({
             </span>
             <span className="nav-item-count tabular-nums">{counts.archived}</span>
           </button>
+
+          <button
+            type="button"
+            className="nav-item"
+            aria-current={activeView === "review" ? "page" : undefined}
+            onClick={() => navigate("review")}
+          >
+            <span className="nav-item-main">
+              <Inbox size={15} aria-hidden="true" />
+              <span className="nav-item-label">Review Queue</span>
+            </span>
+            <span className="nav-item-count tabular-nums">{pendingReviewCount}</span>
+          </button>
         </nav>
 
         <div className="nav-section">
@@ -299,8 +319,11 @@ export function Sidebar({
             <button
               type="button"
               className="nav-manage-btn"
-              aria-current={activeView === "lists" ? "page" : undefined}
-              onClick={() => navigate("lists")}
+              aria-current={activeView === "lists" && activeListId === null ? "page" : undefined}
+              onClick={() => {
+                onSelectListDetail(null);
+                navigate("lists");
+              }}
             >
               Manage ({lists.length})
             </button>
@@ -308,7 +331,8 @@ export function Sidebar({
           {lists.length > 0 ? (
             lists.slice(0, 8).map((list) => {
               const active =
-                activeView === "bookmarks" && selectedList.toLowerCase() === list.name.toLowerCase();
+                (activeView === "lists" && activeListId === list.id) ||
+                (activeView === "bookmarks" && selectedList.toLowerCase() === list.name.toLowerCase());
               return (
                 <button
                   key={list.id}
@@ -316,12 +340,17 @@ export function Sidebar({
                   className="nav-item"
                   aria-pressed={active}
                   onClick={() => {
-                    onSelectListFilter(active ? "" : list.name);
-                    navigate("bookmarks");
+                    onSelectListFilter("");
+                    onSelectListDetail(list.id);
+                    navigate("lists");
                   }}
                 >
                   <span className="nav-item-main">
-                    <FolderKanban size={15} aria-hidden="true" />
+                    {list.is_smart ? (
+                      <Sparkles size={15} aria-hidden="true" />
+                    ) : (
+                      <FolderKanban size={15} aria-hidden="true" />
+                    )}
                     <span className="nav-item-label">{list.name}</span>
                   </span>
                   <span className="nav-item-count tabular-nums">{list.count ?? 0}</span>
@@ -329,7 +358,14 @@ export function Sidebar({
               );
             })
           ) : (
-            <button type="button" className="nav-item" onClick={() => navigate("lists")}>
+            <button
+              type="button"
+              className="nav-item"
+              onClick={() => {
+                onSelectListDetail(null);
+                navigate("lists");
+              }}
+            >
               <span className="nav-item-main">
                 <FolderKanban size={15} aria-hidden="true" />
                 <span className="nav-item-label">Create first list...</span>

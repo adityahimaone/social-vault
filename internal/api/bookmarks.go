@@ -23,6 +23,7 @@ func (s *Server) handleListBookmarks(w http.ResponseWriter, r *http.Request) {
 		Archived:    q.Get("archived"),
 		Tag:         q.Get("tag"),
 		List:        q.Get("list"),
+		Untagged:    strings.EqualFold(strings.TrimSpace(q.Get("untagged")), "true") || strings.TrimSpace(q.Get("untagged")) == "1",
 		Limit:       limit,
 		Offset:      offset,
 		ExcludeNsfw: !s.auth.IsNsfwUnlocked(r),
@@ -71,7 +72,7 @@ func (s *Server) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if existing, err := s.store.GetBookmarkByURL(r.Context(), cleanURL); err == nil {
+	if existing, err := s.findExistingBookmark(r.Context(), cleanURL); err == nil {
 		if !nsfwUnlocked && bookmarkHasNsfwTag(existing) {
 			writeJSON(w, http.StatusConflict, map[string]any{
 				"error": "bookmark already exists",
@@ -98,12 +99,12 @@ func (s *Server) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 	siteName := strings.TrimSpace(body.SiteName)
 
-	if title == "" || desc == "" || favicon == "" {
+	if title == "" || isGenericSocialTitle(title) || desc == "" || favicon == "" {
 		crawlCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		meta, fetchErr := s.fetcher.Fetch(crawlCtx, cleanURL)
 		cancel()
 		if fetchErr == nil {
-			if title == "" {
+			if title == "" || (isGenericSocialTitle(title) && meta.Title != "" && !isGenericSocialTitle(meta.Title)) {
 				title = meta.Title
 			}
 			if desc == "" {
@@ -291,16 +292,20 @@ func (s *Server) handleDeleteBookmark(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
+func (s *Server) findExistingBookmark(ctx context.Context, cleanURL string) (*db.Bookmark, error) {
+	if existing, err := s.store.GetBookmarkByURL(ctx, cleanURL); err == nil {
+		return existing, nil
+	}
+	for _, alt := range alternateDuplicateURLs(cleanURL) {
+		if existing, err := s.store.GetBookmarkByURL(ctx, alt); err == nil {
+			return existing, nil
+		}
+	}
+	return nil, db.ErrNotFound
+}
+
 func validateHTTPURL(raw string) (string, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return "", errors.New("url is required")
-	}
-	u, err := url.Parse(trimmed)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return "", errors.New("url must be a valid http or https URL")
-	}
-	return u.String(), nil
+	return canonicalizeHTTPURL(raw)
 }
 
 func parseIDParam(r *http.Request, name string) (int64, bool) {

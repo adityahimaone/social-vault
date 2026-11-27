@@ -347,6 +347,7 @@
       }
       return {
         id: id,
+        handle: handle,
         hasHandle: Boolean(handle),
         isExactPermalink: true,
         canonicalUrl: handle
@@ -364,6 +365,7 @@
       }
       return {
         id: mediaId,
+        handle: mediaHandle,
         hasHandle: Boolean(mediaHandle),
         isExactPermalink: false,
         canonicalUrl: mediaHandle
@@ -553,6 +555,7 @@
       var atId = atPostMatch[2];
       return {
         id: atId,
+        user: atUser,
         hasUser: true,
         canonicalUrl: "https://" + normalizedHost + "/@" + atUser + "/post/" + atId
       };
@@ -565,6 +568,7 @@
       if (!THREADS_RESERVED_SEGMENTS[bareUser.toLowerCase()]) {
         return {
           id: bareId,
+          user: bareUser,
           hasUser: true,
           canonicalUrl: "https://" + normalizedHost + "/@" + bareUser + "/post/" + bareId
         };
@@ -640,6 +644,141 @@
     return out;
   }
 
+  function extractXArticleDescription(article) {
+    var bodies = safeQueryAll(article, '[data-testid="tweetText"]');
+    var parts = [];
+    for (var i = 0; i < bodies.length; i++) {
+      if (isInsideQuoteOrNestedArticle(bodies[i], article)) {
+        continue;
+      }
+      var txt = String(bodies[i].textContent || "").replace(/\s+/g, " ").trim();
+      if (txt) {
+        parts.push(txt);
+      }
+    }
+    return parts.join(" ").trim();
+  }
+
+  function extractThreadsAnchorDescription(anchor, userHandle) {
+    var container = safeClosest(anchor, "article");
+    if (!container) {
+      container = anchor.parentElement && anchor.parentElement.parentElement
+        ? anchor.parentElement.parentElement
+        : anchor.parentElement;
+    }
+    if (!container) {
+      return "";
+    }
+    var candidates = safeQueryAll(container, '[dir="auto"]');
+    var best = "";
+    for (var i = 0; i < candidates.length; i++) {
+      var txt = String(candidates[i].textContent || "").replace(/\s+/g, " ").trim();
+      if (!txt || txt.length < 12) {
+        continue;
+      }
+      if (userHandle && (txt === userHandle || txt === "@" + userHandle)) {
+        continue;
+      }
+      if (/^\d+[smhdw]$/.test(txt)) {
+        continue;
+      }
+      if (txt.length > best.length) {
+        best = txt;
+      }
+    }
+    return best;
+  }
+
+  function extractPostMetadataMap(platform, rootEl, baseOrigin, options) {
+    var map = Object.create(null);
+    if (!rootEl) {
+      return map;
+    }
+    var minDocumentTop = normalizeMinDocumentTop(options);
+    var currentScrollY = minDocumentTop > 0 ? resolveScrollY(rootEl, options) : null;
+
+    if (platform === "x") {
+      var origin = baseOrigin || "https://x.com";
+      var articles = safeQueryAll(rootEl, "article");
+      for (var i = 0; i < articles.length; i++) {
+        var article = articles[i];
+        if (article.parentElement && safeClosest(article.parentElement, "article")) {
+          continue;
+        }
+        if (isAboveMinDocumentTop(article, minDocumentTop, currentScrollY)) {
+          continue;
+        }
+        var xAnchors = safeQueryAll(article, "a[href]");
+        var hasTimePermalink = false;
+        for (var j = 0; j < xAnchors.length; j++) {
+          var xAnchor = xAnchors[j];
+          if (isInsideQuoteOrNestedArticle(xAnchor, article)) {
+            continue;
+          }
+          var timeCheck = parseXStatusUrl(safeGetAttr(xAnchor, "href"), origin);
+          if (timeCheck && timeCheck.isExactPermalink && safeQuery(xAnchor, "time")) {
+            hasTimePermalink = true;
+            break;
+          }
+        }
+        if (isUnavailableXArticle(article, hasTimePermalink)) {
+          continue;
+        }
+        var found = findXArticlePermalink(article, origin);
+        if (!found) {
+          continue;
+        }
+        var title = found.handle ? "@" + found.handle + " on X" : "";
+        var description = extractXArticleDescription(article);
+        var prevX = map[found.canonicalUrl];
+        if (!prevX) {
+          if (title || description) {
+            map[found.canonicalUrl] = {
+              title: title,
+              description: description
+            };
+          }
+        } else {
+          map[found.canonicalUrl] = {
+            title: prevX.title || title,
+            description: prevX.description || description
+          };
+        }
+      }
+      return map;
+    }
+
+    if (platform === "threads") {
+      var tOrigin = baseOrigin || "https://www.threads.com";
+      var anchors = safeQueryAll(rootEl, "a[href]");
+      for (var j = 0; j < anchors.length; j++) {
+        var anchor = anchors[j];
+        if (safeGetAttr(anchor, "aria-disabled") === "true") {
+          continue;
+        }
+        if (safeClosest(anchor, '[data-unavailable="true"], [data-deleted="true"]')) {
+          continue;
+        }
+        var info = parseThreadsPostUrl(safeGetAttr(anchor, "href"), tOrigin);
+        if (!info) {
+          continue;
+        }
+        var existing = map[info.canonicalUrl];
+        var tTitle = info.user ? "@" + info.user + " on Threads" : "";
+        var tDesc = extractThreadsAnchorDescription(anchor, info.user);
+        if (!existing || (!existing.description && tDesc) || (!existing.title && tTitle)) {
+          map[info.canonicalUrl] = {
+            title: (existing && existing.title) || tTitle,
+            description: (existing && existing.description) || tDesc
+          };
+        }
+      }
+      return map;
+    }
+
+    return map;
+  }
+
   function extractPostUrls(platform, rootEl, baseOrigin, options) {
     if (platform === "x") {
       return extractXPostUrls(rootEl, baseOrigin, options);
@@ -696,6 +835,7 @@
     extractXPostUrls: extractXPostUrls,
     extractThreadsPostUrls: extractThreadsPostUrls,
     extractPostUrls: extractPostUrls,
+    extractPostMetadataMap: extractPostMetadataMap,
     mergeUniqueUrls: mergeUniqueUrls
   };
 

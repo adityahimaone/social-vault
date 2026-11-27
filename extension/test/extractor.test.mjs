@@ -616,3 +616,31 @@ test("createBulkSession applies minDocumentTop filter on initial batch and every
     "https://x.com/resume_c/status/104"
   ]);
 });
+
+test("extractPostMetadataMap extracts X and Threads titles and descriptions without quoted bleed", () => {
+  const xHtml = fs.readFileSync(path.join(__dirname, "fixtures", "x-bookmarks.html"), "utf8");
+  const xDoc = parseHtml(xHtml);
+  const xMeta = extractor.extractPostMetadataMap("x", xDoc, "https://x.com");
+  assert.deepEqual(xMeta["https://x.com/alice_dev/status/1850000000000000001"], {
+    title: "@alice_dev on X",
+    description: "First valid bookmark with query string"
+  });
+  assert.deepEqual(xMeta["https://x.com/bob_ai/status/1850000000000000002"], {
+    title: "@bob_ai on X",
+    description: "Great thread here"
+  });
+
+  const threadsDoc = parseHtml(`
+    <div>
+      <article>
+        <a href="/@aditya.dev/post/DD12345abc_"><time>2h</time></a>
+        <div dir="auto">Building Social Vault with Go + SQLite FTS5</div>
+      </article>
+    </div>
+  `);
+  const tMeta = extractor.extractPostMetadataMap("threads", threadsDoc, "https://www.threads.com");
+  assert.deepEqual(tMeta["https://www.threads.com/@aditya.dev/post/DD12345abc_"], {
+    title: "@aditya.dev on Threads",
+    description: "Building Social Vault with Go + SQLite FTS5"
+  });
+});

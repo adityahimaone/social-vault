@@ -186,7 +186,7 @@ export function AddBookmarkModal({
             />
           </div>
 
-          {lists.length > 0 && (
+          {lists.some((l) => !l.is_smart) && (
             <div className="field">
               <label className="field-label" htmlFor="add-list">
                 List (optional)
@@ -198,11 +198,13 @@ export function AddBookmarkModal({
                 onChange={(e) => setSelectedList(e.target.value)}
               >
                 <option value="">No list</option>
-                {lists.map((l) => (
-                  <option key={l.id} value={l.name}>
-                    {l.name}
-                  </option>
-                ))}
+                {lists
+                  .filter((l) => !l.is_smart)
+                  .map((l) => (
+                    <option key={l.id} value={l.name}>
+                      {l.name}
+                    </option>
+                  ))}
               </select>
             </div>
           )}

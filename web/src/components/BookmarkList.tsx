@@ -3,20 +3,24 @@ import {
   Archive,
   ArchiveRestore,
   Bookmark as BookmarkIcon,
+  Check,
   ExternalLink,
   Eye,
   FolderKanban,
+  FolderPlus,
   Globe,
   Hash,
   Plus,
   Star,
   Upload,
 } from "lucide-react";
-import type { Bookmark, GridDensity, GridStyle } from "../types";
+import type { Bookmark, GridDensity, GridStyle, List } from "../types";
 import { domainFromURL, formatDate } from "../utils/bookmarks";
+import { GlassPopover } from "./GlassPopover";
 
 interface BookmarkListProps {
   items: Bookmark[];
+  lists: List[];
   totalAvailable: number;
   loading: boolean;
   viewMode: "grid" | "list";
@@ -31,6 +35,8 @@ interface BookmarkListProps {
   onQuickLook: (bookmark: Bookmark) => void;
   onToggleFavorite: (bookmark: Bookmark) => void;
   onToggleArchive: (bookmark: Bookmark) => void;
+  onToggleBookmarkList: (bookmark: Bookmark, list: List) => void;
+  onOpenLists: () => void;
   onSelectTag: (tagName: string) => void;
   onSelectList: (listName: string) => void;
   onOpenAdd: () => void;
@@ -101,6 +107,7 @@ function computeColumnCount(width: number, density: GridDensity): number {
 
 export function BookmarkList({
   items,
+  lists,
   loading,
   viewMode,
   gridStyle,
@@ -114,6 +121,8 @@ export function BookmarkList({
   onQuickLook,
   onToggleFavorite,
   onToggleArchive,
+  onToggleBookmarkList,
+  onOpenLists,
   onSelectTag,
   onSelectList,
   onOpenAdd,
@@ -123,6 +132,8 @@ export function BookmarkList({
 }: BookmarkListProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [openListPopoverId, setOpenListPopoverId] = useState<number | null>(null);
+  const manualLists = useMemo(() => lists.filter((l) => !l.is_smart), [lists]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -207,6 +218,63 @@ export function BookmarkList({
     );
   }
 
+  function renderListMenu(item: Bookmark, buttonClass: string, iconSize: number) {
+    const isOpen = openListPopoverId === item.id;
+    return (
+      <GlassPopover
+        open={isOpen}
+        onClose={() => setOpenListPopoverId(null)}
+        label="Assign to list"
+        trigger={
+          <button
+            type="button"
+            className={buttonClass}
+            onClick={() => setOpenListPopoverId(isOpen ? null : item.id)}
+            aria-expanded={isOpen}
+            aria-label={`Add ${item.title || item.url} to list`}
+            title="Add to list"
+          >
+            <FolderPlus size={iconSize} aria-hidden="true" />
+          </button>
+        }
+      >
+        <div className="popover-section">
+          <div className="popover-title">Lists</div>
+          {manualLists.length === 0 ? (
+            <button
+              type="button"
+              className="popover-row"
+              onClick={() => {
+                setOpenListPopoverId(null);
+                onOpenLists();
+              }}
+            >
+              <span>Create first list…</span>
+              <Plus size={13} aria-hidden="true" />
+            </button>
+          ) : (
+            <div className="popover-list">
+              {manualLists.map((list) => {
+                const inList = item.lists.some((l) => l.id === list.id);
+                return (
+                  <button
+                    key={list.id}
+                    type="button"
+                    className={`popover-row ${inList ? "is-selected" : ""}`}
+                    onClick={() => onToggleBookmarkList(item, list)}
+                  >
+                    <span>{list.name}</span>
+                    {inList && <Check size={14} aria-hidden="true" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </GlassPopover>
+    );
+  }
+
   function renderGridCard(item: Bookmark, uniform: boolean) {
     const domain = item.site_name || domainFromURL(item.url);
     const selected = item.id === selectedId;
@@ -229,6 +297,7 @@ export function BookmarkList({
           >
             <Eye size={13} aria-hidden="true" />
           </button>
+          {renderListMenu(item, "card-action-btn", 13)}
           <button
             type="button"
             className={`card-action-btn ${isFav ? "is-fav" : ""}`}
@@ -435,6 +504,7 @@ export function BookmarkList({
                     >
                       <Eye size={14} aria-hidden="true" />
                     </button>
+                    {renderListMenu(item, "btn btn-ghost btn-icon btn-icon-sm", 14)}
                     <button
                       type="button"
                       className={`btn btn-ghost btn-icon btn-icon-sm ${isFav ? "is-fav" : ""}`}

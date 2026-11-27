@@ -76,6 +76,10 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 			skipped++
 			continue
 		}
+		if _, err := s.findExistingBookmark(r.Context(), cleanURL); err == nil {
+			skipped++
+			continue
+		}
 		entry.URL = cleanURL
 		if entry.Title == "" {
 			entry.Title = cleanURL

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -16,12 +17,23 @@ type Tag struct {
 	CreatedAt string `json:"created_at,omitempty"`
 }
 
+type SmartListRule struct {
+	Tags     []string `json:"tags,omitempty"`
+	TagMode  string   `json:"tag_mode,omitempty"` // "any" (default) or "all"
+	Query    string   `json:"query,omitempty"`
+	Domain   string   `json:"domain,omitempty"`
+	Archived string   `json:"archived,omitempty"` // "", "all", "false", "true"
+	Untagged bool     `json:"untagged,omitempty"`
+}
+
 type List struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Count       int    `json:"count,omitempty"`
-	CreatedAt   string `json:"created_at,omitempty"`
+	ID          int64          `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	IsSmart     bool           `json:"is_smart"`
+	Rule        *SmartListRule `json:"rule,omitempty"`
+	Count       int            `json:"count,omitempty"`
+	CreatedAt   string         `json:"created_at,omitempty"`
 }
 
 type Bookmark struct {
@@ -80,6 +92,7 @@ type BookmarkFilter struct {
 	Archived    string // "all", "true", "false"
 	Tag         string
 	List        string
+	Untagged    bool
 	Limit       int
 	Offset      int
 	ExcludeNsfw bool
@@ -213,11 +226,9 @@ func (s *Store) ListBookmarks(ctx context.Context, f BookmarkFilter) ([]Bookmark
 	var where []string
 	var args []any
 
-	ftsQuery := buildFTSQuery(f.Query)
-	if ftsQuery != "" {
-		joins = append(joins, `JOIN bookmarks_fts ON bookmarks_fts.rowid = b.id`)
-		where = append(where, `bookmarks_fts MATCH ?`)
-		args = append(args, ftsQuery)
+	var queryParts []string
+	if q := buildFTSQuery(f.Query); q != "" {
+		queryParts = append(queryParts, q)
 	}
 
 	switch strings.ToLower(strings.TrimSpace(f.Archived)) {
@@ -225,6 +236,13 @@ func (s *Store) ListBookmarks(ctx context.Context, f BookmarkFilter) ([]Bookmark
 		where = append(where, `b.archived = 1`)
 	case "false", "0":
 		where = append(where, `b.archived = 0`)
+	}
+
+	if f.Untagged {
+		where = append(where, `NOT EXISTS (
+			SELECT 1 FROM bookmark_tags bt_untagged
+			WHERE bt_untagged.bookmark_id = b.id
+		)`)
 	}
 
 	if tag := strings.TrimSpace(f.Tag); tag != "" {
@@ -238,15 +256,30 @@ func (s *Store) ListBookmarks(ctx context.Context, f BookmarkFilter) ([]Bookmark
 		}
 	}
 
-	if list := strings.TrimSpace(f.List); list != "" {
-		joins = append(joins, `JOIN bookmark_lists bl ON bl.bookmark_id = b.id JOIN lists l ON l.id = bl.list_id`)
-		if id, err := strconv.ParseInt(list, 10, 64); err == nil && id > 0 {
-			where = append(where, `(l.id = ? OR l.name = ? COLLATE NOCASE)`)
-			args = append(args, id, list)
-		} else {
-			where = append(where, `l.name = ? COLLATE NOCASE`)
-			args = append(args, list)
+	if listRef := strings.TrimSpace(f.List); listRef != "" {
+		list, err := s.GetListByRef(ctx, listRef)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return make([]Bookmark, 0), 0, nil
+			}
+			return nil, 0, err
 		}
+		if list.IsSmart && list.Rule != nil {
+			if rq := applySmartListRule(list.Rule, &where, &args); rq != "" {
+				queryParts = append(queryParts, rq)
+			}
+		} else {
+			joins = append(joins, `JOIN bookmark_lists bl ON bl.bookmark_id = b.id`)
+			where = append(where, `bl.list_id = ?`)
+			args = append(args, list.ID)
+		}
+	}
+
+	ftsQuery := strings.Join(queryParts, " ")
+	if ftsQuery != "" {
+		joins = append([]string{`JOIN bookmarks_fts ON bookmarks_fts.rowid = b.id`}, joins...)
+		where = append([]string{`bookmarks_fts MATCH ?`}, where...)
+		args = append([]any{ftsQuery}, args...)
 	}
 
 	if f.ExcludeNsfw {
@@ -504,7 +537,7 @@ func (s *Store) hydrateBookmarks(ctx context.Context, items []*Bookmark) error {
 	}
 
 	listRows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT bl.bookmark_id, l.id, l.name, l.description, l.created_at
+		SELECT bl.bookmark_id, l.id, l.name, l.description, l.is_smart, l.filter_rule, l.created_at
 		FROM bookmark_lists bl
 		JOIN lists l ON l.id = bl.list_id
 		WHERE bl.bookmark_id IN (%s)
@@ -518,8 +551,14 @@ func (s *Store) hydrateBookmarks(ctx context.Context, items []*Bookmark) error {
 	for listRows.Next() {
 		var bid int64
 		var l List
-		if err := listRows.Scan(&bid, &l.ID, &l.Name, &l.Description, &l.CreatedAt); err != nil {
+		var isSmartInt int
+		var rawRule string
+		if err := listRows.Scan(&bid, &l.ID, &l.Name, &l.Description, &isSmartInt, &rawRule, &l.CreatedAt); err != nil {
 			return fmt.Errorf("scan bookmark list: %w", err)
+		}
+		l.IsSmart = isSmartInt != 0
+		if l.IsSmart {
+			l.Rule = decodeSmartListRule(rawRule)
 		}
 		if b, ok := byID[bid]; ok {
 			b.Lists = append(b.Lists, l)
@@ -676,4 +715,115 @@ func nullableText(s string) sql.NullString {
 		return sql.NullString{}
 	}
 	return sql.NullString{String: trimmed, Valid: true}
+}
+
+// NormalizeSmartListRule validates and normalizes a smart list filter definition.
+func NormalizeSmartListRule(in *SmartListRule) (*SmartListRule, error) {
+	if in == nil {
+		return nil, fmt.Errorf("%w: smart list rule is required", ErrInvalidInput)
+	}
+
+	out := &SmartListRule{
+		Tags:     dedupeTrimmedTags(in.Tags),
+		Query:    strings.TrimSpace(in.Query),
+		Domain:   normalizeSmartDomain(in.Domain),
+		Untagged: in.Untagged,
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(in.TagMode))
+	switch mode {
+	case "", "any":
+		out.TagMode = "any"
+	case "all":
+		out.TagMode = "all"
+	default:
+		return nil, fmt.Errorf("%w: tag_mode must be 'any' or 'all'", ErrInvalidInput)
+	}
+
+	arch := strings.ToLower(strings.TrimSpace(in.Archived))
+	switch arch {
+	case "", "all":
+		out.Archived = ""
+	case "true", "1":
+		out.Archived = "true"
+	case "false", "0":
+		out.Archived = "false"
+	default:
+		return nil, fmt.Errorf("%w: archived must be 'all', 'true', or 'false'", ErrInvalidInput)
+	}
+
+	if len(out.Tags) == 0 && out.Query == "" && out.Domain == "" && out.Archived == "" && !out.Untagged {
+		return nil, fmt.Errorf("%w: smart list rule must define at least one filter condition", ErrInvalidInput)
+	}
+
+	return out, nil
+}
+
+func normalizeSmartDomain(raw string) string {
+	d := strings.ToLower(strings.TrimSpace(raw))
+	d = strings.TrimPrefix(d, "https://")
+	d = strings.TrimPrefix(d, "http://")
+	if idx := strings.IndexAny(d, "/?#"); idx >= 0 {
+		d = d[:idx]
+	}
+	d = strings.TrimPrefix(d, "www.")
+	return strings.TrimRight(d, ".")
+}
+
+func decodeSmartListRule(raw string) *SmartListRule {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var rule SmartListRule
+	if err := json.Unmarshal([]byte(raw), &rule); err != nil {
+		return nil
+	}
+	return &rule
+}
+
+func applySmartListRule(rule *SmartListRule, where *[]string, args *[]any) string {
+	if rule == nil {
+		return ""
+	}
+	if rule.Untagged {
+		*where = append(*where, `NOT EXISTS (
+			SELECT 1 FROM bookmark_tags bt_sl_untagged
+			WHERE bt_sl_untagged.bookmark_id = b.id
+		)`)
+	}
+	if len(rule.Tags) > 0 {
+		if strings.EqualFold(rule.TagMode, "all") {
+			for _, tagName := range rule.Tags {
+				*where = append(*where, `EXISTS (
+					SELECT 1 FROM bookmark_tags bt_sl
+					JOIN tags t_sl ON t_sl.id = bt_sl.tag_id
+					WHERE bt_sl.bookmark_id = b.id AND t_sl.name = ? COLLATE NOCASE
+				)`)
+				*args = append(*args, tagName)
+			}
+		} else {
+			ph := make([]string, len(rule.Tags))
+			for i, tagName := range rule.Tags {
+				ph[i] = "?"
+				*args = append(*args, strings.ToLower(tagName))
+			}
+			*where = append(*where, fmt.Sprintf(`EXISTS (
+				SELECT 1 FROM bookmark_tags bt_sl
+				JOIN tags t_sl ON t_sl.id = bt_sl.tag_id
+				WHERE bt_sl.bookmark_id = b.id AND lower(t_sl.name) IN (%s)
+			)`, strings.Join(ph, ",")))
+		}
+	}
+	if domain := normalizeSmartDomain(rule.Domain); domain != "" {
+		like := "%" + domain + "%"
+		*where = append(*where, `(lower(b.site_name) LIKE ? OR lower(b.url) LIKE ?)`)
+		*args = append(*args, like, like)
+	}
+	switch strings.ToLower(strings.TrimSpace(rule.Archived)) {
+	case "true", "1":
+		*where = append(*where, `b.archived = 1`)
+	case "false", "0":
+		*where = append(*where, `b.archived = 0`)
+	}
+	return buildFTSQuery(rule.Query)
 }
